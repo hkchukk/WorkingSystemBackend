@@ -49,7 +49,7 @@ app.post(
 	},
 );
 
-app.get("/logout", ({ session,logout }) => {
+app.get("/logout", ({ session, logout }) => {
 	session.destroy();
 	return "Logged out";
 });

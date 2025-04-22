@@ -4,7 +4,7 @@ import passport from "npm:passport";
 import { Strategy as LocalStrategy } from "npm:passport-local";
 
 export function initStrategy() {
-	passport.serializeUser((user, done) => {
+	passport.serializeUser((user: { username: string }, done) => {
 		done(null, user.username);
 	});
 	passport.deserializeUser((payload, done) => {

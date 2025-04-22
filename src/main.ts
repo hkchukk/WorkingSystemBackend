@@ -10,13 +10,15 @@ import { authenticated } from "./middleware.ts";
 //@ts-types="npm:@types/cookie-signature"
 import signature from "npm:cookie-signature";
 
-initStrategy();
+const secret = "akpEUnT8iZIFjm-CwmwIf";
 
-const MemoryStore = memoryStore(session);
+initStrategy();
 
 const app = nhttp();
 
 app.use(cors({ credentials: true }));
+
+const MemoryStore = memoryStore(session);
 
 app.use(
 	session({
@@ -26,7 +28,7 @@ app.use(
 		}),
 		resave: true,
 		saveUninitialized: false,
-		secret: "akpEUnT8iZIFjm-CwmwIf",
+		secret,
 	}),
 );
 
@@ -41,15 +43,12 @@ app.post(
 	"/login",
 	passport.authenticate("local"),
 	({ response, user, sessionID }) => {
-		response.cookie(
-			"connect.sid",
-			`s:${signature.sign(sessionID, "akpEUnT8iZIFjm-CwmwIf")}`,
-		);
+		response.cookie("connect.sid", `s:${signature.sign(sessionID, secret)}`);
 		return user;
 	},
 );
 
-app.get("/logout", ({ session, logout }) => {
+app.get("/logout", ({ session }) => {
 	session.destroy();
 	return "Logged out";
 });

@@ -50,7 +50,6 @@ app.post(
 );
 
 app.get("/logout", ({ session,logout }) => {
-	logout();
 	session.destroy();
 	return "Logged out";
 });

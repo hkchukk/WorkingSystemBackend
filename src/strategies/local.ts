@@ -7,9 +7,11 @@ export function initStrategy() {
 	passport.serializeUser((user: { username: string }, done) => {
 		done(null, user.username);
 	});
+	
 	passport.deserializeUser((payload, done) => {
 		done(null, payload);
 	});
+
 	passport.use(
 		new LocalStrategy((username, password, done) => {
 			if (username === "admin" && password === "admin") {

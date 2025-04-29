@@ -4,10 +4,9 @@ import nhttp from "@nhttp/nhttp";
 import cors from "@nhttp/nhttp/cors";
 import memoryStore from "memorystore";
 import { initStrategy } from "./strategies/local.ts";
-import { authenticated } from "./middleware.ts";
-import signature from "cookie-signature";
-
-const secret = "akpEUnT8iZIFjm-CwmwIf";
+import { secret } from "./config.ts";
+import { Glob } from "bun";
+import type IRouter from "./interfaces/IRouter.ts";
 
 initStrategy();
 
@@ -36,27 +35,13 @@ app.get("/", () => {
   return "Hello World!";
 });
 
-app.get("/hi/:user", ({ params }) => {
-  return `Hello ${params.user}!`;
-});
-
-app.post(
-  "/login",
-  passport.authenticate("local"),
-  ({ response, user, sessionID }) => {
-    response.cookie("connect.sid", `s:${signature.sign(sessionID, secret)}`);
-    return user;
-  },
-);
-
-app.get("/logout", ({ session }) => {
-  session.destroy();
-  return "Logged out";
-});
-
-app.get("/protected", authenticated, () => {
-  return "Protected";
-});
+for await (const file of new Glob("**/*.{ts,tsx}").scan({
+  cwd: `${__dirname}/routes`,
+  absolute: true,
+})) {
+  const obj: IRouter = (await import(file)).default;
+  app.use(obj.path, obj.router);
+}
 
 app.listen(3000, () => {
   console.log("Server is ready");

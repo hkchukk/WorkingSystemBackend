@@ -39,8 +39,8 @@ for await (const file of new Glob("**/*.{ts,tsx}").scan({
   cwd: `${__dirname}/routes`,
   absolute: true,
 })) {
-  const obj: IRouter = (await import(file)).default;
-  app.use(obj.path, obj.router);
+  const { path, router }: IRouter = (await import(file)).default;
+  app.use(path, router);
 }
 
 app.listen(3000, () => {

@@ -1,0 +1,24 @@
+{
+  "name": "nhttppassportlocalauth",
+  "module": "./src/index.ts",
+  "type": "module",
+  "private": true,
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/cookie-signature": "^1.1.2",
+    "@types/express-session": "^1.18.1",
+    "@types/passport": "^1.0.17",
+    "@types/passport-local": "^1.0.38"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "@nhttp/nhttp": "npm:@jsr/nhttp__nhttp",
+    "cookie-signature": "^1.2.2",
+    "express-session": "^1.18.1",
+    "memorystore": "^1.6.7",
+    "passport": "^0.7.0",
+    "passport-local": "^1.0.0"
+  }
+}

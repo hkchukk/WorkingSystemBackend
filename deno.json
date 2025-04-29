@@ -1,8 +1,0 @@
-{
-    "compilerOptions": {
-        "strict": false
-    },
-    "tasks": {
-        "start":"deno run -A --watch ./src/main.ts"
-    }
-}

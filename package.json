@@ -3,6 +3,9 @@
   "module": "./src/index.ts",
   "type": "module",
   "private": true,
+  "scripts": {
+    "dev": "bun run --bun --watch ./src/main.ts"
+  },
   "devDependencies": {
     "@types/bun": "latest",
     "@types/cookie-signature": "^1.1.2",

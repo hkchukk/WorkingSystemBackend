@@ -36,6 +36,10 @@ app.get("/", () => {
   return "Hello World!";
 });
 
+app.get("/hi/:user", ({ params }) => {
+  return `Hello ${params.user}!`;
+});
+
 app.post(
   "/login",
   passport.authenticate("local"),

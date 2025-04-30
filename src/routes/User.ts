@@ -21,8 +21,7 @@ router.get("/logout", ({ session }) => {
   return "Logged out";
 });
 
-router.get("/protected", authenticated, (e) => {
-  console.log(e);
+router.get("/protected", authenticated, () => {
   return "Protected";
 });
 

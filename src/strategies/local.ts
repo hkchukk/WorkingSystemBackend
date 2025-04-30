@@ -8,16 +8,18 @@ export function initStrategy() {
 
   passport.deserializeUser((payload, done) => {
     // TODO: Fetch user from database using id and role
-    console.log(payload);
     done(null, payload);
   });
 
   passport.use(
-    new LocalStrategy((username, password, done) => {
-      if (username === "admin" && password === "admin") {
-        return done(null, { username, role: "admin" });
-      }
-      return done(null, false);
-    }),
+    new LocalStrategy(
+      { passReqToCallback: true },
+      (req, username, password, done) => {
+        if (username === "admin" && password === "admin") {
+          return done(null, { username, role: "admin" });
+        }
+        return done(null, false);
+      },
+    ),
   );
 }

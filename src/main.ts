@@ -4,9 +4,8 @@ import nhttp from "@nhttp/nhttp";
 import cors from "@nhttp/nhttp/cors";
 import memoryStore from "memorystore";
 import { initStrategy } from "./strategies/local.ts";
-import { secret } from "./config.ts";
 import { Glob } from "bun";
-import type IRouter from "./interfaces/IRouter.ts";
+import type IRouter from "./Interfaces/IRouter.ts";
 
 initStrategy();
 
@@ -24,7 +23,7 @@ app.use(
     }),
     resave: true,
     saveUninitialized: false,
-    secret,
+    secret: process.env.SECRET,
   }),
 );
 

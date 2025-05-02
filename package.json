@@ -19,6 +19,8 @@
   "dependencies": {
     "@nhttp/nhttp": "npm:@jsr/nhttp__nhttp",
     "cookie-signature": "^1.2.2",
+    "drizzle-kit": "^0.31.0",
+    "drizzle-orm": "^0.43.1",
     "express-session": "^1.18.1",
     "memorystore": "^1.6.7",
     "passport": "^0.7.0",

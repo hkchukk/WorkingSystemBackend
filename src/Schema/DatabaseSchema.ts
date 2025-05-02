@@ -1,0 +1,281 @@
+import {
+  pgTable,
+  varchar,
+  text,
+  timestamp,
+  boolean,
+  integer,
+  json,
+  unique,
+} from "drizzle-orm/pg-core";
+import { relations } from "drizzle-orm";
+import { nanoid } from "nanoid";
+
+// ========== 1. 打工者表（Workers） ==========
+export const workers = pgTable("workers", {
+  workerId: varchar("worker_id", { length: 21 })
+    .$defaultFn(() => nanoid())
+    .primaryKey(),
+
+  email: text("email").notNull().unique(),
+  passwordHash: text("password_hash").notNull(),
+
+  firstName: text("first_name").notNull(),
+  lastName: text("last_name").notNull(),
+  phoneNumber: text("phone_number"),
+
+  // 原有評分欄位
+  averageRating: integer("average_rating").default(0).notNull(),
+  ratingCount: integer("rating_count").default(0).notNull(),
+
+  // === 新增：學歷資訊 ===
+  highestEducation: varchar("highest_education", {
+    // 依需求可調整枚舉內容，如 "高中", "大專", "大學", "碩士", "博士", "其他"
+    enum: ["高中", "大學", "碩士", "博士", "其他"],
+  }).default("大學"),
+  schoolName: text("school_name"), // 學校名稱
+  major: text("major"), // 就讀科系
+  studyStatus: varchar("study_status", {
+    // 就讀中 / 已畢業 / 肄業等
+    enum: ["就讀中", "已畢業", "肄業"],
+  }).default("就讀中"),
+
+  // 持有證書（可能有多張，用 JSON 陣列存放）
+  certificates: json("certificates"),
+
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+// ========== 2. 商家表（Employers） ==========
+// - 加入公司審核、證明文件圖檔、行業別、商家大頭照等欄位
+export const employers = pgTable("employers", {
+  employerId: varchar("employer_id", { length: 21 })
+    .$defaultFn(() => nanoid())
+    .primaryKey(),
+
+  email: text("email").notNull().unique(),
+  passwordHash: text("password_hash").notNull(),
+
+  // 商家名稱 (主畫面顯示)
+  employerName: text("employer_name").notNull(),
+
+  // 分店名稱或其他分支資訊 (可選)
+  branchName: text("branch_name"),
+
+  // 行業別(單選)，示範枚舉
+  industryType: varchar("industry_type", {
+    enum: ["餐飲", "批發/零售", "倉儲運輸", "展場活動", "其他"],
+  }).default("其他"),
+
+  // 商家地址
+  address: text("address"),
+
+  phoneNumber: text("phone_number"),
+
+  // 原有評分欄位
+  averageRating: integer("average_rating").default(0).notNull(),
+  ratingCount: integer("rating_count").default(0).notNull(),
+
+  // === 公司審核所需欄位 ===
+  // 1) 驗證狀態 (eg. pending / approved / rejected)
+  approvalStatus: varchar("approval_status", {
+    enum: ["pending", "approved", "rejected"],
+  })
+    .default("pending")
+    .notNull(),
+
+  // 2) 身分類型：統一編號或身分證字號
+  identificationType: varchar("identification_type", {
+    enum: ["unifiedBusinessNo", "personalId"],
+  })
+    .default("unifiedBusinessNo")
+    .notNull(),
+
+  // 3) 統一編號／身分證字號
+  identificationNumber: varchar("identification_number", { length: 50 }),
+
+  // 4) 證明文件上傳，可存多張圖檔路徑
+  verificationDocuments: json("verification_documents"), // e.g. ["https://...","https://..."]
+
+  // 5) 商家大頭照
+  employerPhoto: text("employer_photo"),
+
+  // 聯繫方式 (可放電話 + email 組合)
+  contactInfo: text("contact_info"),
+
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+// ========== 3. 工作表（Gigs） ==========
+//   (保持原先結構，示範地點用 city / district + isActive)
+export const gigs = pgTable("gigs", {
+  gigId: varchar("gig_id", { length: 21 })
+    .$defaultFn(() => nanoid())
+    .primaryKey(),
+
+  employerId: varchar("employer_id", { length: 21 })
+    .notNull()
+    .references(() => employers.employerId, { onDelete: "cascade" }),
+
+  title: text("title").notNull(),
+  description: json("description"), // 可放工作需求、時薪等
+
+  startDate: timestamp("start_date").defaultNow(),
+  endDate: timestamp("end_date"),
+  requirements: json("requirements"),
+  hourlyRate: integer("hourly_rate").notNull(),
+
+  // 簡化城市 / 區域枚舉
+  city: varchar("city", {
+    enum: ["台北市", "新北市", "桃園市", "台中市", "台南市", "高雄市", "其他"],
+  })
+    .notNull()
+    .default("台北市"),
+  district: varchar("district", {
+    enum: ["大安區", "信義區", "板橋區", "中壢區", "北屯區", "安平區", "其他"],
+  })
+    .notNull()
+    .default("其他"),
+
+  isActive: boolean("is_active").default(true),
+
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+// ========== 4. 工作申請表（GigApplications） ==========
+export const gigApplications = pgTable(
+  "gig_applications",
+  {
+    applicationId: varchar("application_id", { length: 21 })
+      .$defaultFn(() => nanoid())
+      .primaryKey(),
+
+    workerId: varchar("worker_id", { length: 21 })
+      .notNull()
+      .references(() => workers.workerId, { onDelete: "cascade" }),
+
+    gigId: varchar("gig_id", { length: 21 })
+      .notNull()
+      .references(() => gigs.gigId, { onDelete: "cascade" }),
+
+    status: varchar("status", { length: 20 }).default("pending"),
+
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow(),
+  },
+  (table) => [unique("unique_application").on(table.workerId, table.gigId)],
+);
+
+// ========== 5. 商家對打工者的評價（WorkerRatings） ==========
+export const workerRatings = pgTable("worker_ratings", {
+  ratingId: varchar("rating_id", { length: 21 })
+    .$defaultFn(() => nanoid())
+    .primaryKey(),
+
+  workerId: varchar("worker_id", { length: 21 })
+    .notNull()
+    .references(() => workers.workerId, { onDelete: "cascade" }),
+
+  employerId: varchar("employer_id", { length: 21 })
+    .notNull()
+    .references(() => employers.employerId, { onDelete: "cascade" }),
+
+  ratingValue: integer("rating_value").default(5).notNull(),
+  comment: text("comment"),
+
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+// ========== 6. 打工者對商家的評價（EmployerRatings） ==========
+export const employerRatings = pgTable("employer_ratings", {
+  ratingId: varchar("rating_id", { length: 21 })
+    .$defaultFn(() => nanoid())
+    .primaryKey(),
+
+  employerId: varchar("employer_id", { length: 21 })
+    .notNull()
+    .references(() => employers.employerId, { onDelete: "cascade" }),
+
+  workerId: varchar("worker_id", { length: 21 })
+    .notNull()
+    .references(() => workers.workerId, { onDelete: "cascade" }),
+
+  ratingValue: integer("rating_value").default(5).notNull(),
+  comment: text("comment"),
+
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+// ==============================================
+//               關聯定義 (Relations)
+// ==============================================
+
+// Workers
+export const workersRelations = relations(workers, ({ many }) => ({
+  gigApplications: many(gigApplications),
+  workerRatings: many(workerRatings),
+  employerRatings: many(employerRatings),
+}));
+
+// Employers
+export const employersRelations = relations(employers, ({ many }) => ({
+  gigs: many(gigs),
+  workerRatings: many(workerRatings),
+  employerRatings: many(employerRatings),
+}));
+
+// Gigs
+export const gigsRelations = relations(gigs, ({ one, many }) => ({
+  employer: one(employers, {
+    fields: [gigs.employerId],
+    references: [employers.employerId],
+  }),
+  gigApplications: many(gigApplications),
+}));
+
+// GigApplications
+export const gigApplicationsRelations = relations(
+  gigApplications,
+  ({ one }) => ({
+    worker: one(workers, {
+      fields: [gigApplications.workerId],
+      references: [workers.workerId],
+    }),
+    gig: one(gigs, {
+      fields: [gigApplications.gigId],
+      references: [gigs.gigId],
+    }),
+  }),
+);
+
+// WorkerRatings
+export const workerRatingsRelations = relations(workerRatings, ({ one }) => ({
+  worker: one(workers, {
+    fields: [workerRatings.workerId],
+    references: [workers.workerId],
+  }),
+  employer: one(employers, {
+    fields: [workerRatings.employerId],
+    references: [employers.employerId],
+  }),
+}));
+
+// EmployerRatings
+export const employerRatingsRelations = relations(
+  employerRatings,
+  ({ one }) => ({
+    employer: one(employers, {
+      fields: [employerRatings.employerId],
+      references: [employers.employerId],
+    }),
+    worker: one(workers, {
+      fields: [employerRatings.workerId],
+      references: [workers.workerId],
+    }),
+  }),
+);

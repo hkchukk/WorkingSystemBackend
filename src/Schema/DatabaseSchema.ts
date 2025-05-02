@@ -51,7 +51,7 @@ export const employers = pgTable("employers", {
     .primaryKey(),
 
   email: text("email").notNull().unique(),
-  passwordHash: text("password_hash").notNull(),
+  password: text("password").notNull(),
 
   // 商家名稱 (主畫面顯示)
   employerName: text("employer_name").notNull(),
@@ -68,10 +68,6 @@ export const employers = pgTable("employers", {
   address: text("address"),
 
   phoneNumber: text("phone_number"),
-
-  // 原有評分欄位
-  averageRating: integer("average_rating").default(0).notNull(),
-  ratingCount: integer("rating_count").default(0).notNull(),
 
   // === 公司審核所需欄位 ===
   // 1) 驗證狀態 (eg. pending / approved / rejected)
@@ -98,7 +94,7 @@ export const employers = pgTable("employers", {
   employerPhoto: text("employer_photo"),
 
   // 聯繫方式 (可放電話 + email 組合)
-  contactInfo: text("contact_info"),
+  contactInfo: json("contact_info"),
 
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),

@@ -18,15 +18,11 @@ export const workers = pgTable("workers", {
     .primaryKey(),
 
   email: text("email").notNull().unique(),
-  passwordHash: text("password_hash").notNull(),
+  password: text("password").notNull(),
 
   firstName: text("first_name").notNull(),
   lastName: text("last_name").notNull(),
   phoneNumber: text("phone_number"),
-
-  // 原有評分欄位
-  averageRating: integer("average_rating").default(0).notNull(),
-  ratingCount: integer("rating_count").default(0).notNull(),
 
   // === 新增：學歷資訊 ===
   highestEducation: varchar("highest_education", {

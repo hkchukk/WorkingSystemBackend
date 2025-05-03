@@ -38,8 +38,8 @@ app.get("/hashing/:password", ({ params }) => {
   const { password } = params;
   return Bun.password.hash(password, {
     algorithm: "argon2id",
-    memoryCost: 7168,
-    timeCost: 5,
+    memoryCost: 12288,
+    timeCost: 3,
   });
 });
 

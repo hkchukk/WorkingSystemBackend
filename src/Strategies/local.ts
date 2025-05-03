@@ -5,13 +5,14 @@ import { eq } from "drizzle-orm";
 import { employers, workers } from "../Schema/DatabaseSchema";
 import { verify } from "@node-rs/argon2";
 import { argon2Config } from "../config";
+import { Role, type sessionUser } from "../types";
 
 export function initStrategy() {
-  passport.serializeUser((user: { username: string; role: string }, done) => {
-    done(null, { username: user.username, role: user.role });
+  passport.serializeUser((user: sessionUser, done) => {
+    done(null, { ...user });
   });
 
-  passport.deserializeUser((payload, done) => {
+  passport.deserializeUser(async (payload: sessionUser, done) => {
     // TODO: Fetch user from database using id and role
     done(null, payload);
   });
@@ -46,7 +47,10 @@ export function initStrategy() {
           if (!passwordCorrect) {
             return done(null, false, { message: "Incorrect password" });
           }
-          const payload = { id: employer.employerId, role: "employer" };
+          const payload: sessionUser = {
+            id: employer.employerId,
+            role: Role.EMPLOYER,
+          };
           return done(null, payload);
         }
         if (platform === "mobile") {
@@ -64,7 +68,10 @@ export function initStrategy() {
           if (!passwordCorrect) {
             return done(null, false, { message: "Incorrect password" });
           }
-          const payload = { id: worker.workerId, role: "worker" };
+          const payload: sessionUser = {
+            id: worker.workerId,
+            role: Role.WORKER,
+          };
           return done(null, payload);
         }
         return done(null, false, { message: "Platform not supported" });

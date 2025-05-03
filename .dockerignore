@@ -1,0 +1,74 @@
+# flyctl launch added from .gitignore
+# dependencies (bun install)
+**/node_modules
+
+# output
+**/out
+**/dist
+**/*.tgz
+
+# code coverage
+**/coverage
+**/*.lcov
+
+# logs
+**/logs
+**/_.log
+**/report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
+
+# dotenv environment variable files
+**/.env
+**/.env.development.local
+**/.env.test.local
+**/.env.production.local
+**/.env.local
+
+# caches
+**/.eslintcache
+**/.cache
+**/*.tsbuildinfo
+
+# IntelliJ based IDEs
+**/.idea
+
+# Finder (MacOS) folder config
+**/.DS_Store
+src/config.ts
+
+# flyctl launch added from node_modules/nhttppassportlocalauth/.gitignore
+# dependencies (bun install)
+node_modules/nhttppassportlocalauth/**/node_modules
+
+# output
+node_modules/nhttppassportlocalauth/**/out
+node_modules/nhttppassportlocalauth/**/dist
+node_modules/nhttppassportlocalauth/**/*.tgz
+
+# code coverage
+node_modules/nhttppassportlocalauth/**/coverage
+node_modules/nhttppassportlocalauth/**/*.lcov
+
+# logs
+node_modules/nhttppassportlocalauth/**/logs
+node_modules/nhttppassportlocalauth/**/_.log
+node_modules/nhttppassportlocalauth/**/report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
+
+# dotenv environment variable files
+node_modules/nhttppassportlocalauth/**/.env
+node_modules/nhttppassportlocalauth/**/.env.development.local
+node_modules/nhttppassportlocalauth/**/.env.test.local
+node_modules/nhttppassportlocalauth/**/.env.production.local
+node_modules/nhttppassportlocalauth/**/.env.local
+
+# caches
+node_modules/nhttppassportlocalauth/**/.eslintcache
+node_modules/nhttppassportlocalauth/**/.cache
+node_modules/nhttppassportlocalauth/**/*.tsbuildinfo
+
+# IntelliJ based IDEs
+node_modules/nhttppassportlocalauth/**/.idea
+
+# Finder (MacOS) folder config
+node_modules/nhttppassportlocalauth/**/.DS_Store
+node_modules/nhttppassportlocalauth/src/config.ts
+fly.toml

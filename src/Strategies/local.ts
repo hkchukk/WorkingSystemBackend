@@ -2,7 +2,9 @@ import passport from "passport";
 import { Strategy as LocalStrategy } from "passport-local";
 import dbClient from "../Client/DrizzleClient";
 import { eq } from "drizzle-orm";
-import { workers } from "../Schema/DatabaseSchema";
+import { employers, workers } from "../Schema/DatabaseSchema";
+import { verify } from "@node-rs/argon2";
+import { argon2Config } from "../config";
 
 export function initStrategy() {
   passport.serializeUser((user: { username: string; role: string }, done) => {
@@ -30,28 +32,42 @@ export function initStrategy() {
         }
 
         if (platform === "web") {
-        } else if (platform === "mobile") {
+          const employer = await dbClient.query.employers.findFirst({
+            where: eq(employers.email, email),
+          });
+          if (!employer) {
+            return done(null, false, { message: "No employer found" });
+          }
+          const passwordCorrect = await verify(
+            password,
+            employer.password,
+            argon2Config,
+          );
+          if (!passwordCorrect) {
+            return done(null, false, { message: "Incorrect password" });
+          }
+          const payload = { id: employer.employerId, role: "employer" };
+          return done(null, payload);
+        }
+        if (platform === "mobile") {
           const worker = await dbClient.query.workers.findFirst({
             where: eq(workers.email, email),
           });
           if (!worker) {
             return done(null, false, { message: "No worker found" });
           }
-          const passwordCorrect = await Bun.password.verify(
+          const passwordCorrect = await verify(
             password,
             worker.password,
+            argon2Config,
           );
           if (!passwordCorrect) {
             return done(null, false, { message: "Incorrect password" });
           }
-        } else {
-          return done(null, false, { message: "Platform not supported" });
+          const payload = { id: worker.workerId, role: "worker" };
+          return done(null, payload);
         }
-
-        // if (email === "admin" && password === "admin") {
-        //   return done(null, { username: email, role: "admin" });
-        // }
-        // return done(null, false);
+        return done(null, false, { message: "Platform not supported" });
       },
     ),
   );

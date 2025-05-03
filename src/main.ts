@@ -6,6 +6,8 @@ import memoryStore from "memorystore";
 import { initStrategy } from "./Strategies/local.ts";
 import { Glob } from "bun";
 import type IRouter from "./Interfaces/IRouter.ts";
+import { hash } from "@node-rs/argon2";
+import { argon2Config } from "./config.ts";
 
 initStrategy();
 
@@ -36,11 +38,7 @@ app.get("/", () => {
 
 app.get("/hashing/:password", ({ params }) => {
   const { password } = params;
-  return Bun.password.hash(password, {
-    algorithm: "argon2id",
-    memoryCost: 12288,
-    timeCost: 3,
-  });
+  return hash(password, argon2Config);
 });
 
 for await (const file of new Glob("**/*.{ts,tsx}").scan({

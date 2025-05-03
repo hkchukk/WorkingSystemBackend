@@ -25,7 +25,7 @@ app.use(
     }),
     resave: true,
     saveUninitialized: false,
-    secret: process.env.SECRET,
+    secret: process.env.SESSIONSECRET,
   }),
 );
 

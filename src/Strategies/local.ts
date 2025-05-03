@@ -13,8 +13,27 @@ export function initStrategy() {
   });
 
   passport.deserializeUser(async (payload: sessionUser, done) => {
-    // TODO: Fetch user from database using id and role
-    done(null, payload);
+    if (payload.role === Role.EMPLOYER) {
+      const employer = await dbClient.query.employers.findFirst({
+        where: eq(employers.employerId, payload.id),
+      });
+      if (!employer) {
+        return done(null, null);
+      }
+      const { password, ...remains } = employer;
+      return done(null, { ...remains });
+    }
+    if (payload.role === Role.WORKER) {
+      const worker = await dbClient.query.workers.findFirst({
+        where: eq(workers.workerId, payload.id),
+      });
+      if (!worker) {
+        return done(null, null);
+      }
+      const { password, ...remains } = worker;
+      return done(null, { ...remains });
+    }
+    done(null, null);
   });
 
   passport.use(

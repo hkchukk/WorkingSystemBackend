@@ -7,6 +7,8 @@ import {
   integer,
   json,
   unique,
+  date,
+  time,
 } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
 import { nanoid } from "nanoid";
@@ -114,22 +116,15 @@ export const gigs = pgTable("gigs", {
   title: text("title").notNull(),
   description: json("description"), // 可放工作需求、時薪等
 
-  startDate: timestamp("start_date").defaultNow(),
-  endDate: timestamp("end_date"),
+  dateStart: date("date_start").defaultNow(),
+  dateEnd: date("date_end"),
+  timeStart: time("time_start"),
+  timeEnd: time("time_end"),
   requirements: json("requirements"),
   hourlyRate: integer("hourly_rate").notNull(),
 
-  // 簡化城市 / 區域枚舉
-  city: varchar("city", {
-    enum: ["台北市", "新北市", "桃園市", "台中市", "台南市", "高雄市", "其他"],
-  })
-    .notNull()
-    .default("台北市"),
-  district: varchar("district", {
-    enum: ["大安區", "信義區", "板橋區", "中壢區", "北屯區", "安平區", "其他"],
-  })
-    .notNull()
-    .default("其他"),
+  city: varchar("city").notNull(),
+  district: varchar("district").notNull(),
 
   isActive: boolean("is_active").default(true),
 

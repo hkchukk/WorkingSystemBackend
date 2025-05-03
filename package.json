@@ -18,6 +18,7 @@
   },
   "dependencies": {
     "@nhttp/nhttp": "npm:@jsr/nhttp__nhttp",
+    "@nhttp/zod": "npm:@jsr/nhttp__zod",
     "cookie-signature": "^1.2.2",
     "drizzle-kit": "^0.31.0",
     "drizzle-orm": "^0.43.1",

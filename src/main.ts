@@ -3,7 +3,7 @@ import passport from "passport";
 import nhttp from "@nhttp/nhttp";
 import cors from "@nhttp/nhttp/cors";
 import memoryStore from "memorystore";
-import { initStrategy } from "./strategies/local.ts";
+import { initStrategy } from "./Strategies/local.ts";
 import { Glob } from "bun";
 import type IRouter from "./Interfaces/IRouter.ts";
 
@@ -32,6 +32,15 @@ app.use(passport.session());
 
 app.get("/", () => {
   return "Hello World!";
+});
+
+app.get("/hashing/:password", ({ params }) => {
+  const { password } = params;
+  return Bun.password.hash(password, {
+    algorithm: "argon2id",
+    memoryCost: 7168,
+    timeCost: 5,
+  });
 });
 
 for await (const file of new Glob("**/*.{ts,tsx}").scan({

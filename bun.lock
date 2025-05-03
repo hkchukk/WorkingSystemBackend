@@ -5,6 +5,7 @@
       "name": "nhttppassportlocalauth",
       "dependencies": {
         "@nhttp/nhttp": "npm:@jsr/nhttp__nhttp",
+        "@nhttp/zod": "npm:@jsr/nhttp__zod",
         "cookie-signature": "^1.2.2",
         "drizzle-kit": "^0.31.0",
         "drizzle-orm": "^0.43.1",
@@ -83,7 +84,11 @@
 
     "@esbuild/win32-x64": ["@esbuild/win32-x64@0.25.3", "", { "os": "win32", "cpu": "x64" }, "sha512-ICgUR+kPimx0vvRzf+N/7L7tVSQeE3BYY+NhHRHXS1kBuPO7z2+7ea2HbhDyZdTephgvNvKrlDDKUexuCVBVvg=="],
 
+    "@jsr/nhttp__nhttp": ["@jsr/nhttp__nhttp@2.0.2", "https://npm.jsr.io/~/11/@jsr/nhttp__nhttp/2.0.2.tgz", {}, "sha512-D8AxN7hoBG13LEiYPsKSpybFsVZsU8Boh3mWSSL3bU67Jm2tB9uZY0Xsj8YlJtP5q7MKDb9oMiIK/H7uQLqR3Q=="],
+
     "@nhttp/nhttp": ["@jsr/nhttp__nhttp@2.0.2", "https://npm.jsr.io/~/11/@jsr/nhttp__nhttp/2.0.2.tgz", {}, "sha512-D8AxN7hoBG13LEiYPsKSpybFsVZsU8Boh3mWSSL3bU67Jm2tB9uZY0Xsj8YlJtP5q7MKDb9oMiIK/H7uQLqR3Q=="],
+
+    "@nhttp/zod": ["@jsr/nhttp__zod@2.0.2", "https://npm.jsr.io/~/11/@jsr/nhttp__zod/2.0.2.tgz", { "dependencies": { "@jsr/nhttp__nhttp": "^2.0.2", "zod": "3.23.8" } }, "sha512-98OFSLpEWAMEhOSv/EnS+oSwUvAllTdFt3le2YxwHzg/L4qcCl2KYU2Sd1an+Z2DRzWPpUlpUDczmMSK2xV44g=="],
 
     "@types/body-parser": ["@types/body-parser@1.19.5", "", { "dependencies": { "@types/connect": "*", "@types/node": "*" } }, "sha512-fB3Zu92ucau0iQ0JMCFQE7b/dv8Ot07NI3KaZIkIUNXq82k4eBAqUaneXfleGY9JWskeS9y+u0nXMyspcuQrCg=="],
 
@@ -184,6 +189,8 @@
     "utils-merge": ["utils-merge@1.0.1", "", {}, "sha512-pMZTvIkT1d+TFGvDOqodOclx0QWkkgi6Tdoa8gC8ffGAAqz9pzPTZWAybbsHHoED/ztMtkv/VoYTYyShUn81hA=="],
 
     "yallist": ["yallist@2.1.2", "", {}, "sha512-ncTzHV7NvsQZkYe1DW7cbDLm0YpzHmZF5r/iyP3ZnQtMiJ+pjzisCiMNI+Sj+xQF5pXhSHxSB3uDbsBTzY/c2A=="],
+
+    "zod": ["zod@3.23.8", "", {}, "sha512-XBx9AXhXktjUqnepgTiE5flcKIYWi/rme0Eaj+5Y0lftuGBq+jyRu/md4WnuxqgP1ubdpNCsYEYPxrzVHD8d6g=="],
 
     "@esbuild-kit/core-utils/esbuild": ["esbuild@0.18.20", "", { "optionalDependencies": { "@esbuild/android-arm": "0.18.20", "@esbuild/android-arm64": "0.18.20", "@esbuild/android-x64": "0.18.20", "@esbuild/darwin-arm64": "0.18.20", "@esbuild/darwin-x64": "0.18.20", "@esbuild/freebsd-arm64": "0.18.20", "@esbuild/freebsd-x64": "0.18.20", "@esbuild/linux-arm": "0.18.20", "@esbuild/linux-arm64": "0.18.20", "@esbuild/linux-ia32": "0.18.20", "@esbuild/linux-loong64": "0.18.20", "@esbuild/linux-mips64el": "0.18.20", "@esbuild/linux-ppc64": "0.18.20", "@esbuild/linux-riscv64": "0.18.20", "@esbuild/linux-s390x": "0.18.20", "@esbuild/linux-x64": "0.18.20", "@esbuild/netbsd-x64": "0.18.20", "@esbuild/openbsd-x64": "0.18.20", "@esbuild/sunos-x64": "0.18.20", "@esbuild/win32-arm64": "0.18.20", "@esbuild/win32-ia32": "0.18.20", "@esbuild/win32-x64": "0.18.20" }, "bin": { "esbuild": "bin/esbuild" } }, "sha512-ceqxoedUrcayh7Y7ZX6NdbbDzGROiyVBgC4PriJThBKSVPWnnFHZAkfI1lJT8QFkOwH4qOS2SJkS4wvpGl8BpA=="],
 

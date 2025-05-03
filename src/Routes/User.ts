@@ -3,6 +3,7 @@ import passport from "passport";
 import { authenticated } from "../middleware.ts";
 import signature from "cookie-signature";
 import type IRouter from "../Interfaces/IRouter.ts";
+
 const router = new Router();
 
 router.post(
@@ -22,8 +23,8 @@ router.get("/logout", ({ session }) => {
   return "Logged out";
 });
 
-router.get("/protected", authenticated, () => {
-  return "Protected";
+router.get("/profile", authenticated, () => {
+  return "profile";
 });
 
 export default { path: "/user", router } as IRouter;

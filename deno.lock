@@ -13,6 +13,7 @@
     "jsr:@std/path@0.221": "0.221.0",
     "jsr:@std/path@^1.0.9": "1.0.9",
     "npm:@types/cookie-signature@*": "1.1.2",
+    "npm:@types/express-session@*": "1.18.1",
     "npm:@types/node@*": "22.12.0",
     "npm:@types/passport-local@*": "1.0.38",
     "npm:@types/passport@*": "1.0.17",
@@ -360,6 +361,12 @@
         "@types/qs",
         "@types/range-parser",
         "@types/send"
+      ]
+    },
+    "@types/express-session@1.18.1": {
+      "integrity": "sha512-S6TkD/lljxDlQ2u/4A70luD8/ZxZcrU5pQwI1rVXCiaVIywoFgbA+PIUNDjPhQpPdK0dGleLtYc/y7XWBfclBg==",
+      "dependencies": [
+        "@types/express"
       ]
     },
     "@types/express@5.0.1": {

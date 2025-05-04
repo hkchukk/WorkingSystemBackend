@@ -1,13 +1,15 @@
-import session from "express-session";
-import passport from "passport";
-import nhttp from "@nhttp/nhttp";
-import cors from "@nhttp/nhttp/cors";
-import memoryStore from "memorystore";
+// @deno-types="npm:@types/express-session"
+import session from "npm:express-session";
+// @deno-types="npm:@types/passport"
+import passport from "npm:passport";
+import nhttp from "jsr:@nhttp/nhttp";
+import cors from "jsr:@nhttp/nhttp/cors";
+import memoryStore from "npm:memorystore";
 import { initStrategy } from "./Strategies/local.ts";
-import { Glob } from "bun";
 import type IRouter from "./Interfaces/IRouter.ts";
-import { hash } from "@node-rs/argon2";
+import { hash } from "jsr:@felix/argon2";
 import { argon2Config } from "./config.ts";
+import {expandGlob} from "jsr:@std/fs"
 
 initStrategy();
 
@@ -41,11 +43,8 @@ app.get("/hashing/:password", ({ params }) => {
   return hash(password, argon2Config);
 });
 
-for await (const file of new Glob("**/*.{ts,tsx}").scan({
-  cwd: `${__dirname}/Routes`,
-  absolute: true,
-})) {
-  const { path, router }: IRouter = (await import(file)).default;
+for await (const file of expandGlob(`${Deno.cwd()}/Routes/**/*.ts`)) {
+  const { path, router }: IRouter = (await import(`file://${file.path}`)).default;
   app.use(path, router);
 }
 

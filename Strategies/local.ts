@@ -1,11 +1,13 @@
-import passport from "passport";
-import { Strategy as LocalStrategy } from "passport-local";
-import dbClient from "../Client/DrizzleClient";
-import { eq } from "drizzle-orm";
-import { employers, workers } from "../Schema/DatabaseSchema";
-import { verify } from "@node-rs/argon2";
-import { argon2Config } from "../config";
-import { Role, type sessionUser } from "../types";
+// @deno-types="npm:@types/passport"
+import passport from "npm:passport";
+// @deno-types="npm:@types/passport-local"
+import { Strategy as LocalStrategy } from "npm:passport-local";
+import dbClient from "../Client/DrizzleClient.ts";
+import { eq } from "npm:drizzle-orm";
+import { employers, workers } from "../Schema/DatabaseSchema.ts";
+import { verify } from "jsr:@felix/argon2";
+import { argon2Config } from "../config.ts";
+import { Role, type sessionUser } from "../Types/types.ts";
 
 export function initStrategy() {
   passport.serializeUser((user: sessionUser, done) => {
@@ -61,7 +63,7 @@ export function initStrategy() {
           const passwordCorrect = await verify(
             password,
             employer.password,
-            argon2Config,
+            argon2Config.secret,
           );
           if (!passwordCorrect) {
             return done(null, false, { message: "Incorrect password" });
@@ -82,7 +84,7 @@ export function initStrategy() {
           const passwordCorrect = await verify(
             password,
             worker.password,
-            argon2Config,
+            argon2Config.secret,
           );
           if (!passwordCorrect) {
             return done(null, false, { message: "Incorrect password" });

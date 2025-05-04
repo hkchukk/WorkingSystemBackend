@@ -1,7 +1,9 @@
-import { Router } from "@nhttp/nhttp";
-import passport from "passport";
-import { authenticated } from "../middleware.ts";
-import signature from "cookie-signature";
+import { Router } from "jsr:@nhttp/nhttp";
+// @deno-types="npm:@types/passport"
+import passport from "npm:passport";
+import { authenticated } from "../Middleware/middleware.ts";
+// @deno-types="npm:@types/cookie-signature"
+import signature from "npm:cookie-signature";
 import type IRouter from "../Interfaces/IRouter.ts";
 
 const router = new Router();

@@ -9,9 +9,9 @@ import {
   unique,
   date,
   time,
-} from "drizzle-orm/pg-core";
-import { relations } from "drizzle-orm";
-import { nanoid } from "nanoid";
+} from "npm:drizzle-orm/pg-core";
+import { relations } from "npm:drizzle-orm";
+import { nanoid } from "jsr:@sitnik/nanoid";
 
 // ========== 1. 打工者表（Workers） ==========
 export const workers = pgTable("workers", {

@@ -1,0 +1,11 @@
+{
+    "compilerOptions": {
+        "strict": false
+    },
+    "tasks": {
+        "dev": "deno run -A --watch main.ts"
+    },
+    "imports": {
+        "postgres": "npm:postgres@^3.4.5"
+    }
+}

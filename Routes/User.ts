@@ -14,7 +14,7 @@ router.post(
   ({ response, user, sessionID }) => {
     response.cookie(
       "connect.sid",
-      `s:${signature.sign(sessionID, process.env.SECRET)}`,
+      `s:${signature.sign(sessionID, Deno.env.get("SESSIONSECRET"))}`,
     );
     return user;
   },

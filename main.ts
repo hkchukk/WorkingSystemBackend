@@ -27,7 +27,7 @@ app.use(
     }),
     resave: true,
     saveUninitialized: false,
-    secret: process.env.SESSIONSECRET,
+    secret: Deno.env.get("SESSIONSECRET"),
   }),
 );
 

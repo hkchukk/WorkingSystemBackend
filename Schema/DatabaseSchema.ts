@@ -102,6 +102,15 @@ export const employers = pgTable("employers", {
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
+export const admins = pgTable("admins", { 
+  adminId: varchar("admin_id", { length: 21 })
+    .$defaultFn(() => nanoid())
+    .primaryKey(),
+
+  email: text("email").notNull().unique(),
+  password: text("password").notNull()
+});
+
 // ========== 3. 工作表（Gigs） ==========
 //   (保持原先結構，示範地點用 city / district + isActive)
 export const gigs = pgTable("gigs", {

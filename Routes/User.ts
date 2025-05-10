@@ -181,8 +181,44 @@ router.get("/logout", ({ session }) => {
   return "Logged out";
 });
 
-router.get("/profile", authenticated, () => {
-  return "profile";
+router.get("/profile", authenticated, async(rev)  => {
+  const user = rev.session.passport.user;
+
+  if(!user) {
+    return rev.response.status(401).send("No session found");
+  }
+
+  if (user.role == "worker"){    
+    const worker = await dbClient
+      .select()
+      .from(workers)
+      .where(eq(workers.workerId, user.id))
+      .then((rows) => rows[0]);
+    
+    if (!worker) {
+      return rev.response.status(404).send("Worker not found");
+    }
+    const { password, ...remains } = worker;
+    
+    return rev.response.status(200).send(remains);
+  }
+
+  if (user.role == "employer"){
+    const employer = await dbClient
+      .select()
+      .from(employers)
+      .where(eq(employers.employerId, user.id))
+      .then((rows) => rows[0]);
+    
+    if (!employer) {
+      return rev.response.status(404).send("Employer not found");
+    }
+    const { password, ...remains } = employer;
+    
+    return rev.response.status(200).send(remains);
+  }
+
+  return rev.response.status(400).send("Invalid role");
 });
 
 export default { path: "/user", router } as IRouter;

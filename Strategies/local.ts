@@ -70,8 +70,8 @@ export function initStrategy() {
             return done(null, false, { message: "No employer found" });
           }
           const passwordCorrect = await verify(
-            password,
             employer.password,
+            password,
             argon2Config.secret,
           );
           if (!passwordCorrect) {
@@ -92,8 +92,8 @@ export function initStrategy() {
             return done(null, false, { message: "No admin found" });
           }
           const passwordCorrect = await verify(
-            password,
             admin.password,
+            password,
             argon2Config.secret,
           );
           if (!passwordCorrect) {
@@ -114,8 +114,8 @@ export function initStrategy() {
             return done(null, false, { message: "No worker found" });
           }
           const passwordCorrect = await verify(
-            password,
             worker.password,
+            password,
             argon2Config.secret,
           );
           if (!passwordCorrect) {

@@ -10,16 +10,21 @@ import { eq } from "npm:drizzle-orm";
 import { employers, workers} from "../Schema/DatabaseSchema.ts";
 import { argon2Config } from "../config.ts";
 import { hash as argon2hash } from "jsr:@felix/argon2";
+import validate from "jsr:@nhttp/zod"
+import { workerSignupSchema, EmployerSignupSchema } from "../Middleware/validator.ts";
+import { uploadDocument } from "../Middleware/uploadFile.ts";
 
 const router = new Router();
 
-router.post("/register", async(rev) => {
-  const platform = rev.request.headers.get("platform");
-  if (!platform?.length) {
-    return rev.response.status(400).send("Platform is required");
-  }
+router.post(
+  "/register/worker",
+  validate(workerSignupSchema),
+  async (rev) => {
+    const platform = rev.request.headers.get("platform");
+    if (!platform?.length) {
+      return rev.response.status(400).send("Platform is required");
+    }
 
-  if(platform == "mobile"){
     const {
       email,
       password,
@@ -31,7 +36,7 @@ router.post("/register", async(rev) => {
       major,
       studyStatus = "就讀中",
       certificates = [],
-    } = rev.body;  
+    } = rev.body;
 
     if (!email || !password || !firstName || !lastName) {
       return rev.response
@@ -46,9 +51,9 @@ router.post("/register", async(rev) => {
       .then((rows) => rows[0]);
 
     if (existingUser) {
-        return rev.response
-          .status(409)
-          .send("User with this email already exists");
+      return rev.response
+        .status(409)
+        .send("User with this email already exists");
     }
 
     const hashedPassword = await argon2hash(password, argon2Config);
@@ -71,66 +76,28 @@ router.post("/register", async(rev) => {
 
     const newUser = insertedUsers[0];
 
-    return rev.response
-      .status(201)
-      .send({
-        message: "User registered successfully:",
-        user: {
-          workerId: newUser.workerId,
-          email: newUser.email,
-          firstName: newUser.firstName,
-          lastName: newUser.lastName,
-        },
-      });
+    return rev.response.status(201).send({
+      message: "User registered successfully:",
+      user: {
+        workerId: newUser.workerId,
+        email: newUser.email,
+        firstName: newUser.firstName,
+        lastName: newUser.lastName,
+      },
+    });
   }
+);
 
-  if (platform == "web-employer"){
-    const {
-      email,
-      password,
-      employerName,
-      branchName,
-      industryType,
-      address,
-      phoneNumber,
-      identificationType,
-      identificationNumber,
-      verificationDocuments,
-      employerPhoto,
-      contactInfo,
-    } = rev.body;
-
-    if (!email || !password || !employerName) {
-      return rev.response
-        .status(400)
-        .send("email, password and employerName are required");
-    }
-
-    if(!identificationNumber){
-      return rev.response
-          .status(400)
-          .send("identificationNumber are required");
-    }
-
-    const existing = await dbClient
-      .select()
-      .from(employers)
-      .where(eq(employers.email, email))
-      .then((rows) => rows[0]);
-
-    if (existing) {
-      return rev.response
-        .status(409)
-        .send("employer with this email already exists");
-    }
-
-    const hashedPassword = await argon2hash(password, argon2Config);
-
-    const insertedUsers = await dbClient
-      .insert(employers)
-      .values({
+router.post(
+  "/register/employee",
+  validate(EmployerSignupSchema),
+  uploadDocument,
+  async (rev) => {
+    const platform = rev.request.headers.get("platform");
+    if (platform == "web-employer") {
+      const {
         email,
-        password: hashedPassword,
+        password,
         employerName,
         branchName,
         industryType,
@@ -138,18 +105,65 @@ router.post("/register", async(rev) => {
         phoneNumber,
         identificationType,
         identificationNumber,
-        verificationDocuments,
         employerPhoto,
         contactInfo,
-      })
-      .returning();
+      } = rev.body;
 
+      const file = rev.file.verficationDocument;
 
-    const newUser = insertedUsers[0];
+      if (!email || !password || !employerName) {
+        return rev.response
+          .status(400)
+          .send("email, password and employerName are required");
+      }
 
-    return rev.response
-      .status(201)
-      .send({
+      if (!identificationNumber) {
+        return rev.response
+          .status(400)
+          .send("identificationNumber are required");
+      }
+
+      const existing = await dbClient
+        .select()
+        .from(employers)
+        .where(eq(employers.email, email))
+        .then((rows) => rows[0]);
+
+      if (existing) {
+        return rev.response
+          .status(409)
+          .send("employer with this email already exists");
+      }
+
+      if (!file) {
+        return rev.send("File is required");
+      }
+
+      const verificationDocuments = file.path;
+
+      const hashedPassword = await argon2hash(password, argon2Config);
+
+      const insertedUsers = await dbClient
+        .insert(employers)
+        .values({
+          email,
+          password: hashedPassword,
+          employerName,
+          branchName,
+          industryType,
+          address,
+          phoneNumber,
+          identificationType,
+          identificationNumber,
+          verificationDocuments,
+          employerPhoto,
+          contactInfo,
+        })
+        .returning();
+
+      const newUser = insertedUsers[0];
+
+      return rev.response.status(201).send({
         message: "User registered successfully:",
         user: {
           employerId: newUser.employerId,
@@ -157,12 +171,11 @@ router.post("/register", async(rev) => {
           employerName: newUser.employerName,
         },
       });
-  }
+    }
 
-  return rev.response
-    .status(400)
-    .send("Invalid platform");
-});
+    return rev.response.status(400).send("Invalid platform");
+  }
+);
 
 router.post(
   "/login",

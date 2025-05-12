@@ -4,6 +4,9 @@
     "jsr:@denosaurs/plug@^1.0.6": "1.0.6",
     "jsr:@felix/argon2@*": "2.0.2",
     "jsr:@nhttp/nhttp@*": "2.0.2",
+    "jsr:@nhttp/nhttp@^2.0.2": "2.0.2",
+    "jsr:@nhttp/zod@*": "2.0.2",
+    "jsr:@nhttp/zod@^2.0.2": "2.0.2",
     "jsr:@sitnik/nanoid@*": "5.1.5",
     "jsr:@std/assert@0.221": "0.221.0",
     "jsr:@std/encoding@0.221": "0.221.0",
@@ -24,7 +27,8 @@
     "npm:memorystore@*": "1.6.7",
     "npm:passport-local@*": "1.0.0",
     "npm:passport@*": "0.7.0",
-    "npm:postgres@^3.4.5": "3.4.5"
+    "npm:postgres@^3.4.5": "3.4.5",
+    "npm:zod@3.23.8": "3.23.8"
   },
   "jsr": {
     "@denosaurs/plug@1.0.6": {
@@ -44,6 +48,13 @@
     },
     "@nhttp/nhttp@2.0.2": {
       "integrity": "3f792cf5681c56d10e6fafa6c1c5f438b45dcba8037b08d5e593771aa6b3ebf8"
+    },
+    "@nhttp/zod@2.0.2": {
+      "integrity": "56179ebb1402512e95a783773bdcc84f35414121ed445d6286719e81b580c8f1",
+      "dependencies": [
+        "jsr:@nhttp/nhttp@^2.0.2",
+        "npm:zod"
+      ]
     },
     "@sitnik/nanoid@5.1.5": {
       "integrity": "55bd5f57087d67b1dcb7c1f4a07efdfe77a3ac57ca0af90f162c1f676ebf8f4b"
@@ -643,10 +654,14 @@
     },
     "yallist@2.1.2": {
       "integrity": "sha512-ncTzHV7NvsQZkYe1DW7cbDLm0YpzHmZF5r/iyP3ZnQtMiJ+pjzisCiMNI+Sj+xQF5pXhSHxSB3uDbsBTzY/c2A=="
+    },
+    "zod@3.23.8": {
+      "integrity": "sha512-XBx9AXhXktjUqnepgTiE5flcKIYWi/rme0Eaj+5Y0lftuGBq+jyRu/md4WnuxqgP1ubdpNCsYEYPxrzVHD8d6g=="
     }
   },
   "workspace": {
     "dependencies": [
+      "jsr:@nhttp/zod@^2.0.2",
       "npm:postgres@^3.4.5"
     ]
   }

@@ -1,0 +1,2 @@
+# This file forces Git to preserve the 'uploads/documents/' directory.
+# employee-uploaded files will be stored here (ignored by Git via .gitignore).

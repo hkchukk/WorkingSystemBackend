@@ -37,12 +37,6 @@ router.post(
       certificates = [],
     } = body;
 
-    if (!email || !password || !firstName || !lastName) {
-      return response
-        .status(400)
-        .send('email, password, firstName and lastName are required');
-    }
-
     const existingUser = await dbClient
       .select()
       .from(workers)
@@ -89,8 +83,8 @@ router.post(
   '/register/employee',
   validate(employerSignupSchema),
   uploadDocument,
-  async (rev) => {
-    const platform = rev.request.headers.get('platform');
+  async ({ headers, body, file: reqFile, response }) => {
+    const platform = headers.get('platform');
     if (platform === 'web-employer') {
       const {
         email,
@@ -104,18 +98,18 @@ router.post(
         identificationNumber,
         employerPhoto,
         contactInfo,
-      } = rev.body;
+      } = body;
 
-      const file = rev.file.verficationDocument;
+      const file = reqFile.verficationDocument;
 
       if (!email || !password || !employerName) {
-        return rev.response
+        return response
           .status(400)
           .send('email, password and employerName are required');
       }
 
       if (!identificationNumber) {
-        return rev.response
+        return response
           .status(400)
           .send('identificationNumber are required');
       }
@@ -127,13 +121,13 @@ router.post(
         .then((rows) => rows[0]);
 
       if (existing) {
-        return rev.response
+        return response
           .status(409)
           .send('employer with this email already exists');
       }
 
       if (!file) {
-        return rev.send('File is required');
+        return response.status(422).send('File is required');
       }
 
       const verificationDocuments = file.path;
@@ -160,7 +154,7 @@ router.post(
 
       const newUser = insertedUsers[0];
 
-      return rev.response.status(201).send({
+      return response.status(201).send({
         message: 'User registered successfully:',
         user: {
           employerId: newUser.employerId,
@@ -170,7 +164,7 @@ router.post(
       });
     }
 
-    return rev.response.status(400).send('Invalid platform');
+    return response.status(400).send('Invalid platform');
   },
 );
 
@@ -206,7 +200,7 @@ router.get('/profile', authenticated, async ({ session, response }) => {
     }
     const { password, ...remains } = worker;
 
-    return response.status(200).send(remains);
+    return remains;
   }
 
   if (user.role === 'employer') {
@@ -216,12 +210,9 @@ router.get('/profile', authenticated, async ({ session, response }) => {
       .where(eq(employers.employerId, user.id))
       .then((rows) => rows[0]);
 
-    if (!employer) {
-      return response.status(404).send('Employer not found');
-    }
     const { password, ...remains } = employer;
 
-    return response.status(200).send(remains);
+    return remains;
   }
 
   return response.status(400).send('Invalid role');

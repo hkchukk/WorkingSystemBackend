@@ -181,26 +181,16 @@ router.get('/logout', ({ session }) => {
   return 'Logged out';
 });
 
-router.get('/profile', authenticated, async ({ session, response }) => {
-  const user = session.passport.user;
+router.get('/profile', authenticated, async ({ user, response }) => {
 
   if (user.role === 'worker') {
-    const worker = await dbClient.query.workers.findFirst({ where: eq(workers.workerId, user.id) });
-
-    if (!worker) {
-      return response.status(404).send('Worker not found');
-    }
-    const { password, ...remains } = worker;
+    const { password, ...remains } = user;
 
     return remains;
   }
 
   if (user.role === 'employer') {
-    const employer = await dbClient.query.employers.findFirst({
-      where: eq(employers.employerId, user.id),
-    });
-
-    const { password, ...remains } = employer;
+    const { password, ...remains } = user;
 
     return remains;
   }

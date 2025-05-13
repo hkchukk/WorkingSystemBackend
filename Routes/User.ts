@@ -19,71 +19,75 @@ import { uploadDocument } from "../Middleware/uploadFile.ts";
 
 const router = new Router();
 
-router.post("/register/worker", validate(workerSignupSchema), async ({headers,response,body}) => {
-  const platform = headers.get("platform");
-  if (!platform?.length) {
-    return response.status(400).send("Platform is required");
-  }
+router.post(
+  "/register/worker",
+  validate(workerSignupSchema),
+  async ({ headers, response, body }) => {
+    const platform = headers.get("platform");
+    if (!platform?.length) {
+      return response.status(400).send("Platform is required");
+    }
 
-  const {
-    email,
-    password,
-    firstName,
-    lastName,
-    phoneNumber,
-    highestEducation = "大學",
-    schoolName,
-    major,
-    studyStatus = "就讀中",
-    certificates = [],
-  } = body;
-
-  if (!email || !password || !firstName || !lastName) {
-    return response
-      .status(400)
-      .send("email, password, firstName and lastName are required");
-  }
-
-  const existingUser = await dbClient
-    .select()
-    .from(workers)
-    .where(eq(workers.email, email))
-    .then((rows) => rows[0]);
-
-  if (existingUser) {
-    return response.status(409).send("User with this email already exists");
-  }
-
-  const hashedPassword = await argon2hash(password, argon2Config);
-
-  const insertedUsers = await dbClient
-    .insert(workers)
-    .values({
+    const {
       email,
-      password: hashedPassword,
+      password,
       firstName,
       lastName,
       phoneNumber,
-      highestEducation,
+      highestEducation = "大學",
       schoolName,
       major,
-      studyStatus,
-      certificates,
-    })
-    .returning();
+      studyStatus = "就讀中",
+      certificates = [],
+    } = body;
 
-  const newUser = insertedUsers[0];
+    if (!email || !password || !firstName || !lastName) {
+      return response
+        .status(400)
+        .send("email, password, firstName and lastName are required");
+    }
 
-  return response.status(201).send({
-    message: "User registered successfully:",
-    user: {
-      workerId: newUser.workerId,
-      email: newUser.email,
-      firstName: newUser.firstName,
-      lastName: newUser.lastName,
-    },
-  });
-});
+    const existingUser = await dbClient
+      .select()
+      .from(workers)
+      .where(eq(workers.email, email))
+      .then((rows) => rows[0]);
+
+    if (existingUser) {
+      return response.status(409).send("User with this email already exists");
+    }
+
+    const hashedPassword = await argon2hash(password, argon2Config);
+
+    const insertedUsers = await dbClient
+      .insert(workers)
+      .values({
+        email,
+        password: hashedPassword,
+        firstName,
+        lastName,
+        phoneNumber,
+        highestEducation,
+        schoolName,
+        major,
+        studyStatus,
+        certificates,
+      })
+      .returning();
+
+    const newUser = insertedUsers[0];
+
+    return response.status(201).send({
+      message: "User registered successfully:",
+      user: {
+        workerId: newUser.workerId,
+        email: newUser.email,
+        firstName: newUser.firstName,
+        lastName: newUser.lastName,
+      },
+    });
+  },
+);
 
 router.post(
   "/register/employee",

@@ -24,7 +24,6 @@ router.post(
     if (!platform?.length) {
       return response.status(400).send('Platform is required');
     }
-
     const {
       email,
       password,

@@ -19,10 +19,10 @@ import { uploadDocument } from "../Middleware/uploadFile.ts";
 
 const router = new Router();
 
-router.post("/register/worker", validate(workerSignupSchema), async (rev) => {
-  const platform = rev.request.headers.get("platform");
+router.post("/register/worker", validate(workerSignupSchema), async ({headers,response,body}) => {
+  const platform = headers.get("platform");
   if (!platform?.length) {
-    return rev.response.status(400).send("Platform is required");
+    return response.status(400).send("Platform is required");
   }
 
   const {
@@ -36,10 +36,10 @@ router.post("/register/worker", validate(workerSignupSchema), async (rev) => {
     major,
     studyStatus = "就讀中",
     certificates = [],
-  } = rev.body;
+  } = body;
 
   if (!email || !password || !firstName || !lastName) {
-    return rev.response
+    return response
       .status(400)
       .send("email, password, firstName and lastName are required");
   }
@@ -51,7 +51,7 @@ router.post("/register/worker", validate(workerSignupSchema), async (rev) => {
     .then((rows) => rows[0]);
 
   if (existingUser) {
-    return rev.response.status(409).send("User with this email already exists");
+    return response.status(409).send("User with this email already exists");
   }
 
   const hashedPassword = await argon2hash(password, argon2Config);
@@ -74,7 +74,7 @@ router.post("/register/worker", validate(workerSignupSchema), async (rev) => {
 
   const newUser = insertedUsers[0];
 
-  return rev.response.status(201).send({
+  return response.status(201).send({
     message: "User registered successfully:",
     user: {
       workerId: newUser.workerId,

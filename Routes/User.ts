@@ -37,11 +37,9 @@ router.post(
       certificates = [],
     } = body;
 
-    const existingUser = await dbClient
-      .select()
-      .from(workers)
-      .where(eq(workers.email, email))
-      .then((rows) => rows[0]);
+    const existingUser = await dbClient.query.workers.findFirst({
+      where: eq(workers.email, email),
+    });
 
     if (existingUser) {
       return response.status(409).send('User with this email already exists');
@@ -114,11 +112,9 @@ router.post(
           .send('identificationNumber are required');
       }
 
-      const existing = await dbClient
-        .select()
-        .from(employers)
-        .where(eq(employers.email, email))
-        .then((rows) => rows[0]);
+      const existing = await dbClient.query.employers.findFirst({
+        where: eq(employers.email, email),
+      });
 
       if (existing) {
         return response
@@ -189,11 +185,7 @@ router.get('/profile', authenticated, async ({ session, response }) => {
   const user = session.passport.user;
 
   if (user.role === 'worker') {
-    const worker = await dbClient
-      .select()
-      .from(workers)
-      .where(eq(workers.workerId, user.id))
-      .then((rows) => rows[0]);
+    const worker = await dbClient.query.workers.findFirst({ where: eq(workers.workerId, user.id) });
 
     if (!worker) {
       return response.status(404).send('Worker not found');
@@ -204,11 +196,9 @@ router.get('/profile', authenticated, async ({ session, response }) => {
   }
 
   if (user.role === 'employer') {
-    const employer = await dbClient
-      .select()
-      .from(employers)
-      .where(eq(employers.employerId, user.id))
-      .then((rows) => rows[0]);
+    const employer = await dbClient.query.employers.findFirst({
+      where: eq(employers.employerId, user.id),
+    });
 
     const { password, ...remains } = employer;
 

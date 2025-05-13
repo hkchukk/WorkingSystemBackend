@@ -1,4 +1,4 @@
-import { bodyParser, HttpError, Router } from "jsr:@nhttp/nhttp";
+import { Router } from "jsr:@nhttp/nhttp";
 // @deno-types="npm:@types/passport"
 import passport from "npm:passport";
 import { authenticated } from "../Middleware/middleware.ts";
@@ -7,94 +7,91 @@ import signature from "npm:cookie-signature";
 import type IRouter from "../Interfaces/IRouter.ts";
 import dbClient from "../Client/DrizzleClient.ts";
 import { eq } from "npm:drizzle-orm";
-import { employers, workers} from "../Schema/DatabaseSchema.ts";
+import { employers, workers } from "../Schema/DatabaseSchema.ts";
 import { argon2Config } from "../config.ts";
 import { hash as argon2hash } from "jsr:@felix/argon2";
-import validate from "jsr:@nhttp/zod"
-import { workerSignupSchema, EmployerSignupSchema } from "../Middleware/validator.ts";
+import validate from "jsr:@nhttp/zod";
+import {
+  employerSignupSchema,
+  workerSignupSchema,
+} from "../Middleware/validator.ts";
 import { uploadDocument } from "../Middleware/uploadFile.ts";
 
 const router = new Router();
 
-router.post(
-  "/register/worker",
-  validate(workerSignupSchema),
-  async (rev) => {
-    const platform = rev.request.headers.get("platform");
-    if (!platform?.length) {
-      return rev.response.status(400).send("Platform is required");
-    }
+router.post("/register/worker", validate(workerSignupSchema), async (rev) => {
+  const platform = rev.request.headers.get("platform");
+  if (!platform?.length) {
+    return rev.response.status(400).send("Platform is required");
+  }
 
-    const {
+  const {
+    email,
+    password,
+    firstName,
+    lastName,
+    phoneNumber,
+    highestEducation = "大學",
+    schoolName,
+    major,
+    studyStatus = "就讀中",
+    certificates = [],
+  } = rev.body;
+
+  if (!email || !password || !firstName || !lastName) {
+    return rev.response
+      .status(400)
+      .send("email, password, firstName and lastName are required");
+  }
+
+  const existingUser = await dbClient
+    .select()
+    .from(workers)
+    .where(eq(workers.email, email))
+    .then((rows) => rows[0]);
+
+  if (existingUser) {
+    return rev.response.status(409).send("User with this email already exists");
+  }
+
+  const hashedPassword = await argon2hash(password, argon2Config);
+
+  const insertedUsers = await dbClient
+    .insert(workers)
+    .values({
       email,
-      password,
+      password: hashedPassword,
       firstName,
       lastName,
       phoneNumber,
-      highestEducation = "大學",
+      highestEducation,
       schoolName,
       major,
-      studyStatus = "就讀中",
-      certificates = [],
-    } = rev.body;
+      studyStatus,
+      certificates,
+    })
+    .returning();
 
-    if (!email || !password || !firstName || !lastName) {
-      return rev.response
-        .status(400)
-        .send("email, password, firstName and lastName are required");
-    }
+  const newUser = insertedUsers[0];
 
-    const existingUser = await dbClient
-      .select()
-      .from(workers)
-      .where(eq(workers.email, email))
-      .then((rows) => rows[0]);
-
-    if (existingUser) {
-      return rev.response
-        .status(409)
-        .send("User with this email already exists");
-    }
-
-    const hashedPassword = await argon2hash(password, argon2Config);
-
-    const insertedUsers = await dbClient
-      .insert(workers)
-      .values({
-        email,
-        password: hashedPassword,
-        firstName,
-        lastName,
-        phoneNumber,
-        highestEducation,
-        schoolName,
-        major,
-        studyStatus,
-        certificates,
-      })
-      .returning();
-
-    const newUser = insertedUsers[0];
-
-    return rev.response.status(201).send({
-      message: "User registered successfully:",
-      user: {
-        workerId: newUser.workerId,
-        email: newUser.email,
-        firstName: newUser.firstName,
-        lastName: newUser.lastName,
-      },
-    });
-  }
-);
+  return rev.response.status(201).send({
+    message: "User registered successfully:",
+    user: {
+      workerId: newUser.workerId,
+      email: newUser.email,
+      firstName: newUser.firstName,
+      lastName: newUser.lastName,
+    },
+  });
+});
 
 router.post(
   "/register/employee",
-  validate(EmployerSignupSchema),
+  validate(employerSignupSchema),
   uploadDocument,
   async (rev) => {
     const platform = rev.request.headers.get("platform");
-    if (platform == "web-employer") {
+    if (platform === "web-employer") {
       const {
         email,
         password,
@@ -174,7 +171,7 @@ router.post(
     }
 
     return rev.response.status(400).send("Invalid platform");
-  }
+  },
 );
 
 router.post(
@@ -194,44 +191,40 @@ router.get("/logout", ({ session }) => {
   return "Logged out";
 });
 
-router.get("/profile", authenticated, async(rev)  => {
-  const user = rev.session.passport.user;
+router.get("/profile", authenticated, async ({ session, response }) => {
+  const user = session.passport.user;
 
-  if(!user) {
-    return rev.response.status(401).send("No session found");
-  }
-
-  if (user.role == "worker"){    
+  if (user.role === "worker") {
     const worker = await dbClient
       .select()
       .from(workers)
       .where(eq(workers.workerId, user.id))
       .then((rows) => rows[0]);
-    
+
     if (!worker) {
-      return rev.response.status(404).send("Worker not found");
+      return response.status(404).send("Worker not found");
     }
     const { password, ...remains } = worker;
-    
-    return rev.response.status(200).send(remains);
+
+    return response.status(200).send(remains);
   }
 
-  if (user.role == "employer"){
+  if (user.role === "employer") {
     const employer = await dbClient
       .select()
       .from(employers)
       .where(eq(employers.employerId, user.id))
       .then((rows) => rows[0]);
-    
+
     if (!employer) {
-      return rev.response.status(404).send("Employer not found");
+      return response.status(404).send("Employer not found");
     }
     const { password, ...remains } = employer;
-    
-    return rev.response.status(200).send(remains);
+
+    return response.status(200).send(remains);
   }
 
-  return rev.response.status(400).send("Invalid role");
+  return response.status(400).send("Invalid role");
 });
 
 export default { path: "/user", router } as IRouter;

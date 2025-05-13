@@ -6,6 +6,7 @@
         "dev": "deno run -A --env --watch main.ts"
     },
     "imports": {
+        "@nhttp/zod": "jsr:@nhttp/zod@^2.0.2",
         "postgres": "npm:postgres@^3.4.5"
     }
 }

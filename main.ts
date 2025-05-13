@@ -2,7 +2,7 @@
 import session from "npm:express-session";
 // @deno-types="npm:@types/passport"
 import passport from "npm:passport";
-import nhttp from "jsr:@nhttp/nhttp";
+import {nhttp, multipart} from "jsr:@nhttp/nhttp";
 import cors from "jsr:@nhttp/nhttp/cors";
 import memoryStore from "npm:memorystore";
 import { initStrategy } from "./Strategies/local.ts";
@@ -11,9 +11,9 @@ import { hash } from "jsr:@felix/argon2";
 import { argon2Config } from "./config.ts";
 import {expandGlob} from "jsr:@std/fs"
 
-initStrategy();
+initStrategy(); 
 
-const app = nhttp();
+const app = nhttp({ stackError: false });
 
 app.use(cors({ credentials: true }));
 

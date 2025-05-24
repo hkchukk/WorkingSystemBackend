@@ -12,5 +12,5 @@ export const uploadDocument = multipart.upload({
     const randomSuffix = Math.random().toString(36).substring(2, 8);
     const extension = file.name.split(".").pop();
     file.filename = `${timestamp}_${randomSuffix}.${extension}`;
-  }
+  },
 });

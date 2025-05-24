@@ -1,4 +1,3 @@
-
 import passport from "passport";
 import { Strategy as LocalStrategy } from "passport-local";
 import dbClient from "../Client/DrizzleClient.ts";
@@ -14,7 +13,6 @@ export function initStrategy() {
   });
 
   passport.deserializeUser(async (payload: sessionUser, done) => {
-
     if (payload.role === Role.EMPLOYER) {
       const employer = await dbClient.query.employers.findFirst({
         where: eq(employers.employerId, payload.id),
@@ -83,7 +81,7 @@ export function initStrategy() {
           return done(null, payload);
         }
 
-        if( platform === "web-admin") {
+        if (platform === "web-admin") {
           const admin = await dbClient.query.admins.findFirst({
             where: eq(admins.email, email),
           });
@@ -104,7 +102,7 @@ export function initStrategy() {
           };
           return done(null, payload);
         }
-        
+
         if (platform === "mobile") {
           const worker = await dbClient.query.workers.findFirst({
             where: eq(workers.email, email),

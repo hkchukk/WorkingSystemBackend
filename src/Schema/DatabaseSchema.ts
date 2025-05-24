@@ -102,13 +102,13 @@ export const employers = pgTable("employers", {
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
-export const admins = pgTable("admins", { 
+export const admins = pgTable("admins", {
   adminId: varchar("admin_id", { length: 21 })
     .$defaultFn(() => nanoid())
     .primaryKey(),
 
   email: text("email").notNull().unique(),
-  password: text("password").notNull()
+  password: text("password").notNull(),
 });
 
 // ========== 3. 工作表（Gigs） ==========

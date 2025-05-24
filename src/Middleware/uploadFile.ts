@@ -1,4 +1,4 @@
-import { multipart } from "jsr:@nhttp/nhttp";
+import { multipart } from "@nhttp/nhttp";
 
 export const uploadDocument = multipart.upload({
   name: "verficationDocument",

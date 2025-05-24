@@ -1,16 +1,14 @@
-import { Router } from 'jsr:@nhttp/nhttp';
-// @deno-types="npm:@types/passport"
-import passport from 'npm:passport';
+import { Router } from '@nhttp/nhttp';
+import passport from 'passport';
 import { authenticated } from '../Middleware/middleware.ts';
-// @deno-types="npm:@types/cookie-signature"
-import signature from 'npm:cookie-signature';
+import signature from 'cookie-signature';
 import type IRouter from '../Interfaces/IRouter.ts';
 import dbClient from '../Client/DrizzleClient.ts';
-import { eq } from 'npm:drizzle-orm';
+import { eq } from 'drizzle-orm';
 import { employers, workers } from '../Schema/DatabaseSchema.ts';
 import { argon2Config } from '../config.ts';
-import { hash as argon2hash } from 'jsr:@felix/argon2';
-import validate from 'jsr:@nhttp/zod';
+import { hash as argon2hash } from '@node-rs/argon2';
+import validate from '@nhttp/zod';
 import { employerSignupSchema, workerSignupSchema } from '../Middleware/validator.ts';
 import { uploadDocument } from '../Middleware/uploadFile.ts';
 
@@ -170,7 +168,7 @@ router.post(
   ({ response, user, sessionID }) => {
     response.cookie(
       'connect.sid',
-      `s:${signature.sign(sessionID, Deno.env.get('SESSIONSECRET'))}`,
+      `s:${signature.sign(sessionID, process.env.SESSIONSECRET)}`,
     );
     return user;
   },

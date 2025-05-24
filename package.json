@@ -1,0 +1,27 @@
+{
+  "dependencies": {
+    "@nhttp/nhttp": "npm:@jsr/nhttp__nhttp",
+    "@nhttp/zod": "npm:@jsr/nhttp__zod",
+    "@node-rs/argon2": "^2.0.2",
+    "@sitnik/nanoid": "npm:@jsr/sitnik__nanoid",
+    "connect-redis": "^8.1.0",
+    "cookie-signature": "^1.2.2",
+    "drizzle-kit": "^0.31.1",
+    "drizzle-orm": "^0.43.1",
+    "express-session": "^1.18.1",
+    "ioredis": "^5.6.1",
+    "passport": "^0.7.0",
+    "passport-local": "^1.0.0"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.2.14",
+    "@types/cookie-signature": "^1.1.2",
+    "@types/express-session": "^1.18.1",
+    "@types/passport": "^1.0.17",
+    "@types/passport-local": "^1.0.38"
+  },
+  "scripts": {
+    "dev":"bun run --bun --watch ./src/index.ts",
+    "start": "bun run --bun ./src/index.ts"
+  }
+}

@@ -1,4 +1,4 @@
-import { z } from "jsr:@nhttp/zod";
+import { z } from "@nhttp/zod";
 
 export const workerSignupSchema = z.object({
   email: z.string().email("Invalid email format"),

@@ -85,14 +85,14 @@ router.post(
   validate(employerSignupSchema),
   async ({ headers, body, file: reqFile, response }) => {
     const files = reqFile.verficationDocument;
-  
+
     try {
-      const platform:string = headers.get('platform');
-      if (platform === 'web-employer') {
+      const platform: string = headers.get("platform");
+      if (platform === "web-employer") {
         const {
           email,
           password,
-          employerName, 
+          employerName,
           branchName,
           industryType,
           address,
@@ -110,13 +110,19 @@ router.post(
         if (existing) {
           return response
             .status(409)
-            .send('employer with this email already exists');
+            .send("employer with this email already exists");
         }
 
-        const filesInfo: { originalName: string; type: string; r2Name: string }[] = files.map((file: { name: string; type: string; filename: string }) => ({
+        const filesInfo: {
+          originalName: string;
+          type: string;
+          r2Name: string;
+        }[] = files.map((
+          file: { name: string; type: string; filename: string },
+        ) => ({
           originalName: file.name as string,
           type: file.type as string,
-          r2Name: file.filename as string
+          r2Name: file.filename as string,
         }));
 
         const hashedPassword = await argon2hash(password, argon2Config);
@@ -138,7 +144,7 @@ router.post(
             contactInfo,
           })
           .returning();
-        
+
         const client = new S3Client({
           region: "auto",
           accessKeyId: process.env.R2ACCESSKEYID,
@@ -149,20 +155,27 @@ router.post(
         });
 
         await Promise.all(
-          files.map(async (file: { path: string; filename: string; name: string }) => {
-            const currentFile = Bun.file(file.path);
-            if (!currentFile.exists()) {
-              throw new Error(`Verification document file not found: ${file.name}`);
-            }
-            await client.write(`documents/${identificationType}/${file.filename}`, currentFile);
-            console.log(`File ${file.name} uploaded successfully`);
-          })
+          files.map(
+            async (file: { path: string; filename: string; name: string }) => {
+              const currentFile = Bun.file(file.path);
+              if (!currentFile.exists()) {
+                throw new Error(
+                  `Verification document file not found: ${file.name}`,
+                );
+              }
+              await client.write(
+                `documents/${identificationType}/${file.filename}`,
+                currentFile,
+              );
+              console.log(`File ${file.name} uploaded successfully`);
+            },
+          ),
         );
 
         const newUser = body;
 
         return response.status(201).send({
-          message: 'User registered successfully:',
+          message: "User registered successfully:",
           user: {
             employerId: newUser.employerId,
             email: newUser.email,
@@ -170,12 +183,10 @@ router.post(
           },
         });
       }
-      return response.status(400).send('Invalid platform');
-
+      return response.status(400).send("Invalid platform");
     } catch (error) {
-      console.error('Error in register/employee:', error);
-      return response.status(500).send('Internal server error');
-
+      console.error("Error in register/employee:", error);
+      return response.status(500).send("Internal server error");
     } finally {
       for (const file of files) {
         const tmpFile = Bun.file(file.path);

@@ -1,6 +1,5 @@
 import { multipart } from "@nhttp/nhttp";
 
-
 export const uploadDocument = multipart.upload(
   [
     {
@@ -31,6 +30,6 @@ export const uploadDocument = multipart.upload(
         const extension = file.name.split(".").pop();
         file.filename = `${timestamp}_${randomSuffix}.${extension}`;
       },
-    }
-  ]
+    },
+  ],
 );

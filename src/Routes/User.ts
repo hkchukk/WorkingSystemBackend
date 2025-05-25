@@ -14,6 +14,7 @@ import {
   workerSignupSchema,
 } from "../Middleware/validator.ts";
 import { uploadDocument } from "../Middleware/uploadFile.ts";
+import { S3Client, S3File } from "bun";
 
 const router = new Router();
 
@@ -79,87 +80,110 @@ router.post(
 );
 
 router.post(
-  "/register/employee",
-  validate(employerSignupSchema),
+  "/register/employer",
   uploadDocument,
+  validate(employerSignupSchema),
   async ({ headers, body, file: reqFile, response }) => {
-    const platform = headers.get("platform");
-    if (platform === "web-employer") {
-      const {
-        email,
-        password,
-        employerName,
-        branchName,
-        industryType,
-        address,
-        phoneNumber,
-        identificationType,
-        identificationNumber,
-        employerPhoto,
-        contactInfo,
-      } = body;
-
-      const file = reqFile.verficationDocument;
-
-      if (!email || !password || !employerName) {
-        return response
-          .status(400)
-          .send("email, password and employerName are required");
-      }
-
-      if (!identificationNumber) {
-        return response.status(400).send("identificationNumber are required");
-      }
-
-      const existing = await dbClient.query.employers.findFirst({
-        where: eq(employers.email, email),
-      });
-
-      if (existing) {
-        return response
-          .status(409)
-          .send("employer with this email already exists");
-      }
-
-      if (!file) {
-        return response.status(422).send("File is required");
-      }
-
-      const verificationDocuments = file.path;
-
-      const hashedPassword = await argon2hash(password, argon2Config);
-
-      const insertedUsers = await dbClient
-        .insert(employers)
-        .values({
+    const files = reqFile.verficationDocument;
+  
+    try {
+      const platform:string = headers.get('platform');
+      if (platform === 'web-employer') {
+        const {
           email,
-          password: hashedPassword,
-          employerName,
+          password,
+          employerName, 
           branchName,
           industryType,
           address,
           phoneNumber,
           identificationType,
           identificationNumber,
-          verificationDocuments,
           employerPhoto,
           contactInfo,
-        })
-        .returning();
+        } = body;
 
-      const newUser = insertedUsers[0];
+        const existing = await dbClient.query.employers.findFirst({
+          where: eq(employers.email, email),
+        });
 
-      return response.status(201).send({
-        message: "User registered successfully:",
-        user: {
-          employerId: newUser.employerId,
-          email: newUser.email,
-          employerName: newUser.employerName,
-        },
-      });
+        if (existing) {
+          return response
+            .status(409)
+            .send('employer with this email already exists');
+        }
+
+        const filesInfo: { originalName: string; type: string; r2Name: string }[] = files.map((file: { name: string; type: string; filename: string }) => ({
+          originalName: file.name as string,
+          type: file.type as string,
+          r2Name: file.filename as string
+        }));
+
+        const hashedPassword = await argon2hash(password, argon2Config);
+
+        const insertedUsers = await dbClient
+          .insert(employers)
+          .values({
+            email,
+            password: hashedPassword,
+            employerName,
+            branchName,
+            industryType,
+            address,
+            phoneNumber,
+            identificationType,
+            identificationNumber,
+            verificationDocuments: JSON.stringify(filesInfo),
+            employerPhoto,
+            contactInfo,
+          })
+          .returning();
+        
+        const client = new S3Client({
+          region: "auto",
+          accessKeyId: process.env.R2ACCESSKEYID,
+          secretAccessKey: process.env.R2SECRETACCESSKEY,
+          endpoint: process.env.R2ENDPOINT,
+          bucket: "backend-files",
+          retry: 1,
+        });
+
+        await Promise.all(
+          files.map(async (file: { path: string; filename: string; name: string }) => {
+            const currentFile = Bun.file(file.path);
+            if (!currentFile.exists()) {
+              throw new Error(`Verification document file not found: ${file.name}`);
+            }
+            await client.write(`documents/${identificationType}/${file.filename}`, currentFile);
+            console.log(`File ${file.name} uploaded successfully`);
+          })
+        );
+
+        const newUser = body;
+
+        return response.status(201).send({
+          message: 'User registered successfully:',
+          user: {
+            employerId: newUser.employerId,
+            email: newUser.email,
+            employerName: newUser.employerName,
+          },
+        });
+      }
+      return response.status(400).send('Invalid platform');
+
+    } catch (error) {
+      console.error('Error in register/employee:', error);
+      return response.status(500).send('Internal server error');
+
+    } finally {
+      for (const file of files) {
+        const tmpFile = Bun.file(file.path);
+        if (tmpFile.exists()) {
+          await tmpFile.delete();
+        }
+      }
     }
-
-    return response.status(400).send("Invalid platform");
   },
 );
 

@@ -33,17 +33,11 @@ export const employerSignupSchema = z.object({
   employerName: z.string(),
   branchName: z.string().optional(),
   industryType: z.string().min(2, "Industry type required"),
-  address: z.object({
-    street: z.string().min(1),
-    city: z.string().min(1),
-    state: z.string().min(1),
-    postalCode: z.string().min(1),
-    country: z.string().min(1),
-  }),
+  address: z.string().min(5, "Address must be at least 5 characters"),
   phoneNumber: z
     .string()
     .regex(/^(09\d{8}|\+8869\d{8}|0\d{1,2}-?\d{6,8})$/, "Invalid phone number"),
-  identificationType: z.enum(["unifiedBusinessNo", "personalId"]),
+  identificationType: z.enum(["businessNo", "personalId"]),
   identificationNumber: z.string().min(5, "ID number too short"),
   contactInfo: z
     .object({

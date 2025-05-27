@@ -44,7 +44,8 @@ app.get("/hashing/:password", ({ params }) => {
 for await (const file of new Glob(`${__dirname}/Routes/**/*.ts`).scan({
   absolute: true,
 })) {
-  const { path, router }: IRouter = await import(file);
+  const module = await import(file);
+  const { path, router }: IRouter = module.default;
   app.use(path, router);
 }
 

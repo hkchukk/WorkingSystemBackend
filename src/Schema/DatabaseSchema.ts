@@ -81,9 +81,9 @@ export const employers = pgTable("employers", {
 
   // 2) 身分類型：統一編號或身分證字號
   identificationType: varchar("identification_type", {
-    enum: ["unifiedBusinessNo", "personalId"],
+    enum: ["businessNo", "personalId"],
   })
-    .default("unifiedBusinessNo")
+    .default("businessNo")
     .notNull(),
 
   // 3) 統一編號／身分證字號

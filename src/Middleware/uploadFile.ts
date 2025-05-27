@@ -9,7 +9,6 @@ export const uploadDocument = multipart.upload(
       maxSize: "2mb",
       maxCount: 2,
       accept: ["pdf", "jpg", "jpeg", "png"],
-      required: true,
       callback: (file) => {
         const timestamp = Date.now();
         const randomSuffix = Math.random().toString(36).substring(2, 8);
@@ -23,7 +22,6 @@ export const uploadDocument = multipart.upload(
       maxSize: "2mb",
       maxCount: 2,
       accept: ["pdf", "jpg", "jpeg", "png"],
-      required: true,
       callback: (file) => {
         const timestamp = Date.now();
         const randomSuffix = Math.random().toString(36).substring(2, 8);

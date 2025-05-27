@@ -84,7 +84,14 @@ router.post(
   uploadDocument,
   validate(employerSignupSchema),
   async ({ headers, body, file: reqFile, response }) => {
-    const files = reqFile.verficationDocument;
+    var files = null;
+    if(body.identificationType == "businessNo" && reqFile.verficationDocument.length > 1) {
+      files = reqFile.verficationDocument;
+    }else if(body.identificationType == "personalId" && reqFile.identificationDocument.length > 1) {
+      files = reqFile.identificationDocument;
+    }else{
+      return response.status(400).send("Invalid identification document");
+    }
 
     try {
       const platform: string = headers.get("platform");

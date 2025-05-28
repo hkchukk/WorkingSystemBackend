@@ -21,7 +21,7 @@ export function initStrategy() {
         return done(null, null);
       }
       const { password, ...remains } = employer;
-      return done(null, { ...remains, role: Role.EMPLOYER, employerId: payload.id });
+      return done(null, { ...remains, role: Role.EMPLOYER });
     }
     if (payload.role === Role.WORKER) {
       const worker = await dbClient.query.workers.findFirst({
@@ -31,7 +31,7 @@ export function initStrategy() {
         return done(null, null);
       }
       const { password, ...remains } = worker;
-      return done(null, { ...remains, role: Role.WORKER, workerId: payload.id });
+      return done(null, { ...remains, role: Role.WORKER });
     }
     if (payload.role === Role.ADMIN) {
       const admin = await dbClient.query.admins.findFirst({
@@ -39,7 +39,7 @@ export function initStrategy() {
       });
       if (!admin) return done(null, null);
       const { password, ...remains } = admin;
-      return done(null, { ...remains, role: Role.ADMIN, adminId: payload.id });
+      return done(null, { ...remains, role: Role.ADMIN });
     }
     done(null, null);
   });

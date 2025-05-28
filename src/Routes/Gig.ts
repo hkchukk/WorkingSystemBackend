@@ -22,23 +22,38 @@ const client = new S3Client({
 });
 
 // 統一的照片上傳處理函數
-const handlePhotoUpload = async (reqFile: any) => {
-  if (!reqFile?.environmentPhotos) {
-    return { environmentPhotosInfo: null, uploadedFiles: [] };
-  }
-
+const handlePhotoUpload = async (reqFile: any, existingPhotos: any[] = []) => {
   const files = Array.isArray(reqFile.environmentPhotos) 
     ? reqFile.environmentPhotos 
     : [reqFile.environmentPhotos];
 
-  const uploadedFiles = files;
+  let uploadedFiles = files;
+  let message = "";
 
-  // 驗證並限制環境照片數量
-  if (files.length > 3) {
-    console.warn(`警告：環境照片數量超過限制 (${files.length} > 3)，將只保留前 3 張`);
+  // 檢查累加後是否超過3張
+  const totalAfterAdd = existingPhotos.length + files.length;
+  
+  if (totalAfterAdd > 3) {
+    const canAdd = 3 - existingPhotos.length;
+    if (canAdd <= 0) {
+      // 已經有3張照片，無法添加更多
+      return { 
+        environmentPhotosInfo: existingPhotos, 
+        uploadedFiles: [],
+        addedCount: 0,
+        totalCount: existingPhotos.length,
+        message: `已有${existingPhotos.length}張照片，已達最大限制（3張），未添加新照片`
+      };
+    }
+    // 只處理能添加的數量
+    uploadedFiles = files.slice(0, canAdd);
+    message = `只能添加${canAdd}張照片（總共限制3張），已忽略多餘的${files.length - canAdd}張照片`;
+  } else {
+    message = `成功添加${files.length}張照片`;
   }
 
-  const environmentPhotosInfo = files.slice(0, 3).map((file: any) => ({
+  // 新照片的資訊
+  const newPhotosInfo = uploadedFiles.map((file: any) => ({
     originalName: file.name,
     type: file.type,
     filename: file.filename,
@@ -65,7 +80,16 @@ const handlePhotoUpload = async (reqFile: any) => {
     throw new Error("環境照片上傳失敗");
   }
 
-  return { environmentPhotosInfo, uploadedFiles };
+  // 將新照片添加到現有照片後面
+  const allPhotos = [...existingPhotos, ...newPhotosInfo];
+
+  return { 
+    environmentPhotosInfo: allPhotos, 
+    uploadedFiles,
+    addedCount: newPhotosInfo.length,
+    totalCount: allPhotos.length,
+    message
+  };
 };
 
 // 清理臨時文件函數
@@ -118,7 +142,11 @@ const formatEnvironmentPhotos = (environmentPhotos: string | null) => {
 // 驗證商家權限和狀態
 const validateEmployer = async (user: any) => {
   if (user.role !== Role.EMPLOYER) {
-    throw new Error("只有商家可以執行此操作");
+    return {
+      isValid: false,
+      error: "只有商家可以執行此操作",
+      statusCode: 403
+    };
   }
 
   const employer = await dbClient.query.employers.findFirst({
@@ -126,15 +154,26 @@ const validateEmployer = async (user: any) => {
   });
 
   if (!employer) {
-    throw new Error("商家不存在");
+    return {
+      isValid: false,
+      error: "商家不存在",
+      statusCode: 403
+    };
   }
 
   // 暫時註釋審核檢查
   // if (employer.approvalStatus !== "approved") {
-  //   throw new Error("商家尚未通過審核，無法發佈工作");
+  //   return {
+  //     isValid: false,
+  //     error: "商家尚未通過審核，無法發佈工作",
+  //     statusCode: 403
+  //   };
   // }
 
-  return employer;
+  return {
+    isValid: true,
+    employer
+  };
 };
 
 // 構建工作數據物件
@@ -218,7 +257,10 @@ router.post(
     
     try {
       // 驗證商家權限
-      await validateEmployer(user);
+      const validationResult = await validateEmployer(user);
+      if (!validationResult.isValid) {
+        return response.status(validationResult.statusCode).send(validationResult.error);
+      }
 
       // 處理照片上傳
       const { environmentPhotosInfo, uploadedFiles: files } = await handlePhotoUpload(reqFile);
@@ -250,9 +292,6 @@ router.post(
       console.error("創建工作時出錯:", error);
       const errorMessage = error instanceof Error ? error.message : "伺服器內部錯誤";
       
-      if (errorMessage.includes("只有商家") || errorMessage.includes("商家不存在") || errorMessage.includes("尚未通過審核")) {
-        return response.status(403).send(errorMessage);
-      }
       if (errorMessage.includes("照片上傳失敗")) {
         return response.status(500).send(errorMessage);
       }
@@ -272,7 +311,10 @@ router.get(
   async ({ user, response, query }) => {
     try {
       // 驗證商家權限
-      await validateEmployer(user);
+      const validationResult = await validateEmployer(user);
+      if (!validationResult.isValid) {
+        return response.status(validationResult.statusCode).send(validationResult.error);
+      }
 
       const page = parseInt(query.page) || 1;
       const limit = parseInt(query.limit) || 10;
@@ -306,12 +348,6 @@ router.get(
       });
     } catch (error) {
       console.error("獲取工作列表時出錯:", error);
-      const errorMessage = error instanceof Error ? error.message : "伺服器內部錯誤";
-      
-      if (errorMessage.includes("只有商家") || errorMessage.includes("商家不存在")) {
-        return response.status(403).send(errorMessage);
-      }
-      
       return response.status(500).send("伺服器內部錯誤");
     }
   }
@@ -383,7 +419,10 @@ router.put(
     
     try {
       // 驗證商家權限
-      await validateEmployer(user);
+      const validationResult = await validateEmployer(user);
+      if (!validationResult.isValid) {
+        return response.status(validationResult.statusCode).send(validationResult.error);
+      }
 
       const { gigId } = params;
 
@@ -397,7 +436,8 @@ router.put(
       }
 
       // 處理照片上傳（如果有新照片上傳）
-      const { environmentPhotosInfo, uploadedFiles: files } = await handlePhotoUpload(reqFile);
+      const existingPhotos = formatEnvironmentPhotos(typeof existingGig.environmentPhotos === 'string' ? existingGig.environmentPhotos : null) || [];
+      const { environmentPhotosInfo, uploadedFiles: files, addedCount, totalCount, message } = await handlePhotoUpload(reqFile, existingPhotos);
       uploadedFiles = files;
 
       // 構建更新數據
@@ -417,7 +457,7 @@ router.put(
       if (body.contactPerson) updateData.contactPerson = body.contactPerson;
       if (body.contactPhone !== undefined) updateData.contactPhone = body.contactPhone;
       if (body.contactEmail !== undefined) updateData.contactEmail = body.contactEmail;
-      if (environmentPhotosInfo) updateData.environmentPhotos = JSON.stringify(environmentPhotosInfo);
+      if (addedCount > 0) updateData.environmentPhotos = JSON.stringify(environmentPhotosInfo);
       if (body.publishedAt) updateData.publishedAt = new Date(body.publishedAt).toISOString().split('T')[0];
       if (body.unlistedAt) updateData.unlistedAt = new Date(body.unlistedAt).toISOString().split('T')[0];
       if (body.isActive !== undefined) updateData.isActive = body.isActive;
@@ -429,16 +469,25 @@ router.put(
         .set(updateData)
         .where(eq(gigs.gigId, gigId));
 
+      // 只有在有照片相關操作時才顯示照片訊息
+      const hasPhotoOperation = reqFile?.environmentPhotos;
+      const responseMessage = hasPhotoOperation && addedCount > 0 
+        ? `工作更新成功，${message}`
+        : hasPhotoOperation && addedCount === 0
+        ? `工作更新成功，${message}`
+        : "工作更新成功";
+
       return response.status(200).send({
-        message: "工作更新成功",
+        message: responseMessage,
+        photoInfo: hasPhotoOperation ? {
+          totalPhotos: totalCount,
+          addedPhotos: addedCount,
+        } : undefined,
       });
     } catch (error) {
       console.error("更新工作時出錯:", error);
       const errorMessage = error instanceof Error ? error.message : "伺服器內部錯誤";
       
-      if (errorMessage.includes("只有商家") || errorMessage.includes("商家不存在")) {
-        return response.status(403).send(errorMessage);
-      }
       if (errorMessage.includes("照片上傳失敗")) {
         return response.status(500).send(errorMessage);
       }
@@ -458,7 +507,10 @@ router.patch(
   async ({ user, params, response }) => {
     try {
       // 驗證商家權限
-      await validateEmployer(user);
+      const validationResult = await validateEmployer(user);
+      if (!validationResult.isValid) {
+        return response.status(validationResult.statusCode).send(validationResult.error);
+      }
 
       const { gigId } = params;
 
@@ -485,12 +537,6 @@ router.patch(
       });
     } catch (error) {
       console.error("切換工作狀態時出錯:", error);
-      const errorMessage = error instanceof Error ? error.message : "伺服器內部錯誤";
-      
-      if (errorMessage.includes("只有商家") || errorMessage.includes("商家不存在")) {
-        return response.status(403).send(errorMessage);
-      }
-      
       return response.status(500).send("伺服器內部錯誤");
     }
   }
@@ -503,7 +549,10 @@ router.delete(
   async ({ user, params, response }) => {
     try {
       // 驗證商家權限
-      await validateEmployer(user);
+      const validationResult = await validateEmployer(user);
+      if (!validationResult.isValid) {
+        return response.status(validationResult.statusCode).send(validationResult.error);
+      }
 
       const { gigId } = params;
 
@@ -531,12 +580,6 @@ router.delete(
       });
     } catch (error) {
       console.error("刪除工作時出錯:", error);
-      const errorMessage = error instanceof Error ? error.message : "伺服器內部錯誤";
-      
-      if (errorMessage.includes("只有商家") || errorMessage.includes("商家不存在")) {
-        return response.status(403).send(errorMessage);
-      }
-      
       return response.status(500).send("伺服器內部錯誤");
     }
   }

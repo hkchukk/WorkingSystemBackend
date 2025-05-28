@@ -112,32 +112,61 @@ export const admins = pgTable("admins", {
 });
 
 // ========== 3. 工作表（Gigs） ==========
-//   (保持原先結構，示範地點用 city / district + isActive)
 export const gigs = pgTable("gigs", {
+  // 工作ID
   gigId: varchar("gig_id", { length: 21 })
     .$defaultFn(() => nanoid())
     .primaryKey(),
 
+  // 商家ID
   employerId: varchar("employer_id", { length: 21 })
     .notNull()
     .references(() => employers.employerId, { onDelete: "cascade" }),
 
-  title: text("title").notNull(),
+  // 工作標題
+  title: varchar("title", { length: 256 }).notNull(),
+  // 工作描述
   description: json("description"), // 可放工作需求、時薪等
 
-  dateStart: date("date_start").defaultNow(),
-  dateEnd: date("date_end"),
-  timeStart: time("time_start"),
-  timeEnd: time("time_end"),
+  // 工作日期
+  dateStart: date("date_start").notNull(),
+  dateEnd: date("date_end").notNull(),
+  // 工作時間
+  timeStart: varchar("time_start", { length: 20 }).notNull(),
+  timeEnd: varchar("time_end", { length: 20 }).notNull(),
+  // 工作需求
   requirements: json("requirements"),
+
+  // 時薪
   hourlyRate: integer("hourly_rate").notNull(),
+  // 城市
+  city: varchar("city", { length: 32 }).notNull(),
+  // 地區
+  district: varchar("district", { length: 32 }).notNull(),
+  // 地址
+  address: varchar("address", { length: 256 }).notNull(),
 
-  city: varchar("city").notNull(),
-  district: varchar("district").notNull(),
+  // 打工環境照上傳，可存多張圖檔路徑
+  environmentPhotos: json("environment_photos"),
 
+  // 聯絡人
+  contactPerson: varchar("contact_person", { length: 32 }).notNull(),
+  // 聯絡人電話
+  contactPhone: varchar("contact_phone", { length: 32 }),
+  // 聯絡人Email
+  contactEmail: varchar("contact_email", { length: 128 }),
+
+  // 是否啟用
   isActive: boolean("is_active").default(true),
 
+  // 刊登時間
+  publishedAt: date("published_at").notNull(),
+  // 下架時間
+  unlistedAt: date("unlisted_at"),
+
+  // 工作ID建立時間
   createdAt: timestamp("created_at").defaultNow(),
+  // 工作ID更新時間
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 

@@ -18,6 +18,30 @@ import { S3Client, S3File } from "bun";
 
 const router = new Router();
 
+// 清理臨時文件函數
+const cleanupTempFiles = async (uploadedFiles: any[]) => {
+  if (uploadedFiles.length > 0) {
+    for (const file of uploadedFiles) {
+      try {
+        // 檢查 file.path 是否存在，如果不存在，嘗試構建路徑
+        const filePath = file.path || `src/uploads/documents/${file.filename}`;
+        // 使用 Bun 的正確檔案刪除 API
+        const bunFile = Bun.file(filePath);
+        const exists = await bunFile.exists();
+        
+        if (exists) {
+          await bunFile.delete();
+          console.log(`成功刪除臨時文件: ${filePath}`);
+        } else {
+          console.log(`檔案不存在: ${filePath}`);
+        }
+      } catch (cleanupError) {
+        console.error("清理臨時文件時出錯:", cleanupError);
+      }
+    }
+  }
+};
+
 router.post(
   "/register/worker",
   validate(workerSignupSchema),
@@ -196,12 +220,7 @@ router.post(
       console.error("Error in register/employee:", error);
       return response.status(500).send("Internal server error");
     } finally {
-      for (const file of files) {
-        const tmpFile = Bun.file(file.path);
-        if (tmpFile.exists()) {
-          await tmpFile.delete();
-        }
-      }
+      await cleanupTempFiles(files);
     }
   },
 );

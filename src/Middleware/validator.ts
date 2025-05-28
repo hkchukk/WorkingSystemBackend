@@ -79,14 +79,13 @@ export const createGigSchema = z.object({
     throw new Error("時間格式不正確 (應為 HH:MM)");
   }),
   requirements: z.any().optional(),
-  hourlyRate: z.number().min(1, "時薪必須大於 0").max(10000, "時薪過高"),
+  hourlyRate: z.coerce.number().min(1, "時薪必須大於 0").max(10000, "時薪過高"),
   city: z.string().min(1, "城市不能為空").max(32, "城市名稱過長"),
   district: z.string().min(1, "地區不能為空").max(32, "地區名稱過長"),
   address: z.string().min(1, "地址不能為空").max(256, "地址過長"),
   contactPerson: z.string().min(1, "聯絡人不能為空").max(32, "聯絡人姓名過長"),
   contactPhone: z.string().regex(/^(09\d{8}|\+8869\d{8}|0\d{1,2}-?\d{6,8})$/, "聯絡電話格式不正確").optional(),
   contactEmail: z.string().email("聯絡人 Email 格式不正確").max(128, "Email 過長").optional(),
-  environmentPhotos: z.array(z.string().url("照片 URL 格式不正確")).optional(),
   publishedAt: z.coerce.date(),
   unlistedAt: z.coerce.date().optional(),
 }).refine((data) => {
@@ -149,17 +148,16 @@ export const updateGigSchema = z.object({
     throw new Error("時間格式不正確 (應為 HH:MM)");
   }).optional(),
   requirements: z.any().optional(),
-  hourlyRate: z.number().min(1, "時薪必須大於 0").max(10000, "時薪過高").optional(),
+  hourlyRate: z.coerce.number().min(1, "時薪必須大於 0").max(10000, "時薪過高").optional(),
   city: z.string().min(1, "城市不能為空").max(32, "城市名稱過長").optional(),
   district: z.string().min(1, "地區不能為空").max(32, "地區名稱過長").optional(),
   address: z.string().min(1, "地址不能為空").max(256, "地址過長").optional(),
   contactPerson: z.string().min(1, "聯絡人不能為空").max(32, "聯絡人姓名過長").optional(),
   contactPhone: z.string().regex(/^(09\d{8}|\+8869\d{8}|0\d{1,2}-?\d{6,8})$/, "聯絡電話格式不正確").optional(),
   contactEmail: z.string().email("聯絡人 Email 格式不正確").max(128, "Email 過長").optional(),
-  environmentPhotos: z.array(z.string().url("照片 URL 格式不正確")).optional(),
   publishedAt: z.coerce.date().optional(),
   unlistedAt: z.coerce.date().optional(),
-  isActive: z.boolean().optional(),
+  isActive: z.coerce.boolean().optional(),
 }).refine((data) => {
   if (data.timeStart && data.timeEnd) {
     const [startHour, startMin] = data.timeStart.split(':').map(Number);

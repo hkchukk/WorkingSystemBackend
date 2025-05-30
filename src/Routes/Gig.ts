@@ -59,6 +59,8 @@ const handlePhotoUpload = async (reqFile: any, existingPhotos: any[] = []) => {
       };
     }
     uploadedFiles = files.slice(0, canAdd);
+    const rejectedFiles = files.slice(canAdd);
+    cleanupTempFiles(rejectedFiles);
     message = `只能添加${canAdd}張照片，已忽略多餘的${files.length - canAdd}張`;
   } else {
     message = `成功添加${files.length}張照片`;
@@ -223,8 +225,8 @@ router.post(
   requireApprovedEmployer,
   uploadEnvironmentPhotos,
   validate(createGigSchema),
-  async ({ user, body, file, files, response }) => {
-    const reqFile = file || files || {};
+  async ({ user, body, file, response }) => {
+    const reqFile = file || {};
     let uploadedFiles: any[] = [];
     
     try {
@@ -351,8 +353,8 @@ router.put(
   requireApprovedEmployer,
   uploadEnvironmentPhotos,
   validate(updateGigSchema),
-  async ({ user, params, body, file, files, response }) => {
-    const reqFile = file || files || {};
+  async ({ user, params, body, file, response }) => {
+    const reqFile = file || {};
     let uploadedFiles: any[] = [];
     
     try {

@@ -187,3 +187,10 @@ export const updateGigSchema = z.object({
   message: "下架日期必須晚於刊登日期",
   path: ["unlistedAt"]
 });
+
+// 申請審核驗證 Schema
+export const reviewApplicationSchema = z.object({
+  status: z.enum(["approved", "rejected"], {
+    required_error: "必須選擇核准或拒絕",
+  }),
+});

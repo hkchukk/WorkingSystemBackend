@@ -49,6 +49,7 @@ const handlePhotoUpload = async (reqFile: any, existingPhotos: any[] = []) => {
   if (totalAfterAdd > 3) {
     const canAdd = 3 - existingPhotos.length;
     if (canAdd <= 0) {
+      cleanupTempFiles(files);
       return { 
         environmentPhotosInfo: existingPhotos, 
         uploadedFiles: [],
@@ -71,18 +72,24 @@ const handlePhotoUpload = async (reqFile: any, existingPhotos: any[] = []) => {
     size: file.size,
   }));
 
-  // 上傳到 R2/S3
+  // 一次過並行上傳
   try {
     await Promise.all(
       uploadedFiles.map(async (file: any) => {
         const currentFile = Bun.file(file.path);
+        
+        // 檢查檔案是否存在
+        if (!await currentFile.exists()) {
+          throw new Error(`檔案不存在: ${file.path}`);
+        }
+        
         await client.write(`environment-photos/${file.filename}`, currentFile);
         console.log(`環境照片 ${file.name} 上傳成功`);
       })
     );
   } catch (uploadError) {
     console.error("上傳環境照片時出錯:", uploadError);
-    throw new Error("環境照片上傳失敗");
+    throw new Error(`環境照片上傳失敗: ${uploadError instanceof Error ? uploadError.message : '未知錯誤'}`);
   }
 
   const allPhotos = [...existingPhotos, ...newPhotosInfo];
@@ -96,10 +103,12 @@ const handlePhotoUpload = async (reqFile: any, existingPhotos: any[] = []) => {
   };
 };
 
-// 清理臨時文件函數
+// 清理臨時文件
 const cleanupTempFiles = async (uploadedFiles: any[]) => {
-  if (uploadedFiles.length > 0) {
-    for (const file of uploadedFiles) {
+  if (uploadedFiles.length === 0) return;
+  
+  Promise.all(
+    uploadedFiles.map(async (file) => {
       try {
         const bunFile = Bun.file(file.path);
         if (await bunFile.exists()) {
@@ -109,8 +118,8 @@ const cleanupTempFiles = async (uploadedFiles: any[]) => {
       } catch (cleanupError) {
         console.error(`清理臨時文件時出錯 ${file.filename}:`, cleanupError);
       }
-    }
-  }
+    })
+  ).catch(err => console.error('批次清理檔案時出錯:', err));
 };
 
 // 處理環境照片數據格式的輔助函數
@@ -212,15 +221,16 @@ router.post(
   authenticated,
   requireEmployer,
   requireApprovedEmployer,
-  validate(createGigSchema),
   uploadEnvironmentPhotos,
-  async ({ user, body, file: reqFile, response }) => {
+  validate(createGigSchema),
+  async ({ user, body, file, files, response }) => {
+    const reqFile = file || files || {};
     let uploadedFiles: any[] = [];
     
     try {
       // 處理照片上傳
-      const { environmentPhotosInfo, uploadedFiles: files } = await handlePhotoUpload(reqFile);
-      uploadedFiles = files;
+      const { environmentPhotosInfo, uploadedFiles: filesList } = await handlePhotoUpload(reqFile);
+      uploadedFiles = filesList;
 
       // 構建工作數據
       const gigData = buildGigData(body, user, environmentPhotosInfo);
@@ -254,8 +264,7 @@ router.post(
       
       return response.status(500).send("伺服器內部錯誤");
     } finally {
-      // 清理臨時文件
-      await cleanupTempFiles(uploadedFiles);
+      cleanupTempFiles(uploadedFiles);
     }
   }
 );
@@ -340,9 +349,10 @@ router.put(
   authenticated,
   requireEmployer,
   requireApprovedEmployer,
-  validate(updateGigSchema),
   uploadEnvironmentPhotos,
-  async ({ user, params, body, file: reqFile, response }) => {
+  validate(updateGigSchema),
+  async ({ user, params, body, file, files, response }) => {
+    const reqFile = file || files || {};
     let uploadedFiles: any[] = [];
     
     try {
@@ -358,8 +368,8 @@ router.put(
       }
 
       const existingPhotos = formatEnvironmentPhotos(typeof existingGig.environmentPhotos === 'string' ? existingGig.environmentPhotos : null) || [];
-      const { environmentPhotosInfo, uploadedFiles: files, addedCount, totalCount, message } = await handlePhotoUpload(reqFile, existingPhotos);
-      uploadedFiles = files;
+      const { environmentPhotosInfo, uploadedFiles: filesList, addedCount, totalCount, message } = await handlePhotoUpload(reqFile, existingPhotos);
+      uploadedFiles = filesList;
 
       // 構建更新數據
       const updateData: any = {};
@@ -415,8 +425,7 @@ router.put(
       
       return response.status(500).send("伺服器內部錯誤");
     } finally {
-      // 清理臨時文件
-      await cleanupTempFiles(uploadedFiles);
+      cleanupTempFiles(uploadedFiles);
     }
   }
 );

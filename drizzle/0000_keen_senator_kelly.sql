@@ -1,3 +1,10 @@
+CREATE TABLE "admins" (
+	"admin_id" varchar(21) PRIMARY KEY NOT NULL,
+	"email" text NOT NULL,
+	"password" text NOT NULL,
+	CONSTRAINT "admins_email_unique" UNIQUE("email")
+);
+--> statement-breakpoint
 CREATE TABLE "employer_ratings" (
 	"rating_id" varchar(21) PRIMARY KEY NOT NULL,
 	"employer_id" varchar(21) NOT NULL,
@@ -18,7 +25,7 @@ CREATE TABLE "employers" (
 	"address" text,
 	"phone_number" text,
 	"approval_status" varchar DEFAULT 'pending' NOT NULL,
-	"identification_type" varchar DEFAULT 'unifiedBusinessNo' NOT NULL,
+	"identification_type" varchar DEFAULT 'businessNo' NOT NULL,
 	"identification_number" varchar(50),
 	"verification_documents" json,
 	"employer_photo" text,
@@ -32,26 +39,32 @@ CREATE TABLE "gig_applications" (
 	"application_id" varchar(21) PRIMARY KEY NOT NULL,
 	"worker_id" varchar(21) NOT NULL,
 	"gig_id" varchar(21) NOT NULL,
-	"status" varchar(20) DEFAULT 'pending',
+	"status" varchar DEFAULT 'pending' NOT NULL,
 	"created_at" timestamp DEFAULT now(),
-	"updated_at" timestamp DEFAULT now(),
-	CONSTRAINT "unique_application" UNIQUE("worker_id","gig_id")
+	"updated_at" timestamp DEFAULT now()
 );
 --> statement-breakpoint
 CREATE TABLE "gigs" (
 	"gig_id" varchar(21) PRIMARY KEY NOT NULL,
 	"employer_id" varchar(21) NOT NULL,
-	"title" text NOT NULL,
+	"title" varchar(256) NOT NULL,
 	"description" json,
-	"date_start" date DEFAULT now(),
-	"date_end" date,
-	"time_start" time,
-	"time_end" time,
+	"date_start" date NOT NULL,
+	"date_end" date NOT NULL,
+	"time_start" varchar(20) NOT NULL,
+	"time_end" varchar(20) NOT NULL,
 	"requirements" json,
 	"hourly_rate" integer NOT NULL,
-	"city" varchar NOT NULL,
-	"district" varchar NOT NULL,
+	"city" varchar(32) NOT NULL,
+	"district" varchar(32) NOT NULL,
+	"address" varchar(256) NOT NULL,
+	"environment_photos" json,
+	"contact_person" varchar(32) NOT NULL,
+	"contact_phone" varchar(32),
+	"contact_email" varchar(128),
 	"is_active" boolean DEFAULT true,
+	"published_at" date NOT NULL,
+	"unlisted_at" date,
 	"created_at" timestamp DEFAULT now(),
 	"updated_at" timestamp DEFAULT now()
 );

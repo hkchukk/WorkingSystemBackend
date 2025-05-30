@@ -1,9 +1,48 @@
 {
-  "id": "c1a7ecad-58eb-490e-b2b4-edb5ef3323a4",
+  "id": "950c5efe-36b6-4c6f-848e-aea4fafbe297",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
+    "public.admins": {
+      "name": "admins",
+      "schema": "",
+      "columns": {
+        "admin_id": {
+          "name": "admin_id",
+          "type": "varchar(21)",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "email": {
+          "name": "email",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "password": {
+          "name": "password",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "admins_email_unique": {
+          "name": "admins_email_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "email"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.employer_ratings": {
       "name": "employer_ratings",
       "schema": "",
@@ -154,7 +193,7 @@
           "type": "varchar",
           "primaryKey": false,
           "notNull": true,
-          "default": "'unifiedBusinessNo'"
+          "default": "'businessNo'"
         },
         "identification_number": {
           "name": "identification_number",
@@ -235,9 +274,9 @@
         },
         "status": {
           "name": "status",
-          "type": "varchar(20)",
+          "type": "varchar",
           "primaryKey": false,
-          "notNull": false,
+          "notNull": true,
           "default": "'pending'"
         },
         "created_at": {
@@ -285,16 +324,7 @@
         }
       },
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "unique_application": {
-          "name": "unique_application",
-          "nullsNotDistinct": false,
-          "columns": [
-            "worker_id",
-            "gig_id"
-          ]
-        }
-      },
+      "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
@@ -317,7 +347,7 @@
         },
         "title": {
           "name": "title",
-          "type": "text",
+          "type": "varchar(256)",
           "primaryKey": false,
           "notNull": true
         },
@@ -331,26 +361,25 @@
           "name": "date_start",
           "type": "date",
           "primaryKey": false,
-          "notNull": false,
-          "default": "now()"
+          "notNull": true
         },
         "date_end": {
           "name": "date_end",
           "type": "date",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true
         },
         "time_start": {
           "name": "time_start",
-          "type": "time",
+          "type": "varchar(20)",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true
         },
         "time_end": {
           "name": "time_end",
-          "type": "time",
+          "type": "varchar(20)",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true
         },
         "requirements": {
           "name": "requirements",
@@ -366,15 +395,45 @@
         },
         "city": {
           "name": "city",
-          "type": "varchar",
+          "type": "varchar(32)",
           "primaryKey": false,
           "notNull": true
         },
         "district": {
           "name": "district",
-          "type": "varchar",
+          "type": "varchar(32)",
           "primaryKey": false,
           "notNull": true
+        },
+        "address": {
+          "name": "address",
+          "type": "varchar(256)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "environment_photos": {
+          "name": "environment_photos",
+          "type": "json",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "contact_person": {
+          "name": "contact_person",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "contact_phone": {
+          "name": "contact_phone",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "contact_email": {
+          "name": "contact_email",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": false
         },
         "is_active": {
           "name": "is_active",
@@ -382,6 +441,18 @@
           "primaryKey": false,
           "notNull": false,
           "default": true
+        },
+        "published_at": {
+          "name": "published_at",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "unlisted_at": {
+          "name": "unlisted_at",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
         },
         "created_at": {
           "name": "created_at",

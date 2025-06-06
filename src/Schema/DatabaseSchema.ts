@@ -6,9 +6,7 @@ import {
   boolean,
   integer,
   json,
-  unique,
   date,
-  time,
 } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
 import { nanoid } from "@sitnik/nanoid";
@@ -186,12 +184,14 @@ export const gigApplications = pgTable(
       .notNull()
       .references(() => gigs.gigId, { onDelete: "cascade" }),
 
-    status: varchar("status", { length: 20 }).default("pending"),
+    // 申請狀態：pending(待審核), approved(已核准), rejected(已拒絕), cancelled(已取消)
+    status: varchar("status", {
+      enum: ["pending", "approved", "rejected", "cancelled"],
+    }).default("pending").notNull(),
 
     createdAt: timestamp("created_at").defaultNow(),
     updatedAt: timestamp("updated_at").defaultNow(),
   },
-  (table) => [unique("unique_application").on(table.workerId, table.gigId)],
 );
 
 // ========== 5. 商家對打工者的評價（WorkerRatings） ==========

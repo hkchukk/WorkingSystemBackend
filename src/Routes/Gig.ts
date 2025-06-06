@@ -1,13 +1,16 @@
 import { Router } from "@nhttp/nhttp";
 import { authenticated } from "../Middleware/middleware.ts";
+import { 
+  requireEmployer, 
+  requireApprovedEmployer
+} from "../Middleware/guards.ts";
 import type IRouter from "../Interfaces/IRouter.ts";
 import dbClient from "../Client/DrizzleClient.ts";
 import { eq, and, desc } from "drizzle-orm";
-import { gigs, employers, gigApplications } from "../Schema/DatabaseSchema.ts";
+import { gigs, gigApplications } from "../Schema/DatabaseSchema.ts";
 import validate from "@nhttp/zod";
 import { createGigSchema, updateGigSchema } from "../Middleware/validator.ts";
 import { uploadEnvironmentPhotos } from "../Middleware/uploadFile.ts";
-import { Role } from "../Types/types.ts";
 import { S3Client } from "bun";
 
 const router = new Router();
@@ -23,36 +26,47 @@ const client = new S3Client({
 
 // 統一的照片上傳處理函數
 const handlePhotoUpload = async (reqFile: any, existingPhotos: any[] = []) => {
+  // 如果沒有上傳檔案，返回現有照片
+  if (!reqFile?.environmentPhotos) {
+    return { 
+      environmentPhotosInfo: existingPhotos, 
+      uploadedFiles: [],
+      addedCount: 0,
+      totalCount: existingPhotos.length,
+      message: "未上傳新照片"
+    };
+  }
+
   const files = Array.isArray(reqFile.environmentPhotos) 
     ? reqFile.environmentPhotos 
     : [reqFile.environmentPhotos];
 
+  // 檢查累加後是否超過3張照片限制
+  const totalAfterAdd = existingPhotos.length + files.length;
   let uploadedFiles = files;
   let message = "";
 
-  // 檢查累加後是否超過3張
-  const totalAfterAdd = existingPhotos.length + files.length;
-  
   if (totalAfterAdd > 3) {
     const canAdd = 3 - existingPhotos.length;
     if (canAdd <= 0) {
-      // 已經有3張照片，無法添加更多
+      cleanupTempFiles(files);
       return { 
         environmentPhotosInfo: existingPhotos, 
         uploadedFiles: [],
         addedCount: 0,
         totalCount: existingPhotos.length,
-        message: `已有${existingPhotos.length}張照片，已達最大限制（3張），未添加新照片`
+        message: `不能再添加照片，已達最大限制（3張）`
       };
     }
-    // 只處理能添加的數量
     uploadedFiles = files.slice(0, canAdd);
-    message = `只能添加${canAdd}張照片（總共限制3張），已忽略多餘的${files.length - canAdd}張照片`;
+    const rejectedFiles = files.slice(canAdd);
+    cleanupTempFiles(rejectedFiles);
+    message = `只能添加${canAdd}張照片，已忽略多餘的${files.length - canAdd}張`;
   } else {
     message = `成功添加${files.length}張照片`;
   }
 
-  // 新照片的資訊
+  // 建立照片資訊
   const newPhotosInfo = uploadedFiles.map((file: any) => ({
     originalName: file.name,
     type: file.type,
@@ -60,27 +74,26 @@ const handlePhotoUpload = async (reqFile: any, existingPhotos: any[] = []) => {
     size: file.size,
   }));
 
-  // 上傳到 S3/R2
+  // 一次過並行上傳
   try {
     await Promise.all(
       uploadedFiles.map(async (file: any) => {
         const currentFile = Bun.file(file.path);
-        if (!currentFile.exists()) {
-          throw new Error(`環境照片文件未找到: ${file.name}`);
+        
+        // 檢查檔案是否存在
+        if (!await currentFile.exists()) {
+          throw new Error(`檔案不存在: ${file.path}`);
         }
-        await client.write(
-          `environment-photos/${file.filename}`,
-          currentFile,
-        );
+        
+        await client.write(`environment-photos/${file.filename}`, currentFile);
         console.log(`環境照片 ${file.name} 上傳成功`);
       })
     );
   } catch (uploadError) {
     console.error("上傳環境照片時出錯:", uploadError);
-    throw new Error("環境照片上傳失敗");
+    throw new Error(`環境照片上傳失敗: ${uploadError instanceof Error ? uploadError.message : '未知錯誤'}`);
   }
 
-  // 將新照片添加到現有照片後面
   const allPhotos = [...existingPhotos, ...newPhotosInfo];
 
   return { 
@@ -92,28 +105,23 @@ const handlePhotoUpload = async (reqFile: any, existingPhotos: any[] = []) => {
   };
 };
 
-// 清理臨時文件函數
+// 清理臨時文件
 const cleanupTempFiles = async (uploadedFiles: any[]) => {
-  if (uploadedFiles.length > 0) {
-    for (const file of uploadedFiles) {
+  if (uploadedFiles.length === 0) return;
+  
+  Promise.all(
+    uploadedFiles.map(async (file) => {
       try {
-        // 檢查 file.path 是否存在，如果不存在，嘗試構建路徑
-        const filePath = file.path || `src/uploads/environmentPhotos/${file.filename}`;
-        // 使用 Bun 的正確檔案刪除 API
-        const bunFile = Bun.file(filePath);
-        const exists = await bunFile.exists();
-        
-        if (exists) {
+        const bunFile = Bun.file(file.path);
+        if (await bunFile.exists()) {
           await bunFile.delete();
-          console.log(`成功刪除臨時文件: ${filePath}`);
-        } else {
-          console.log(`檔案不存在: ${filePath}`);
+          console.log(`成功刪除臨時文件: ${file.filename}`);
         }
       } catch (cleanupError) {
-        console.error("清理臨時文件時出錯:", cleanupError);
+        console.error(`清理臨時文件時出錯 ${file.filename}:`, cleanupError);
       }
-    }
-  }
+    })
+  ).catch(err => console.error('批次清理檔案時出錯:', err));
 };
 
 // 處理環境照片數據格式的輔助函數
@@ -137,43 +145,6 @@ const formatEnvironmentPhotos = (environmentPhotos: string | null) => {
     console.error("解析環境照片數據時出錯:", error);
     return null;
   }
-};
-
-// 驗證商家權限和狀態
-const validateEmployer = async (user: any) => {
-  if (user.role !== Role.EMPLOYER) {
-    return {
-      isValid: false,
-      error: "只有商家可以執行此操作",
-      statusCode: 403
-    };
-  }
-
-  const employer = await dbClient.query.employers.findFirst({
-    where: eq(employers.employerId, user.employerId),
-  });
-
-  if (!employer) {
-    return {
-      isValid: false,
-      error: "商家不存在",
-      statusCode: 403
-    };
-  }
-
-  // 暫時註釋審核檢查
-  // if (employer.approvalStatus !== "approved") {
-  //   return {
-  //     isValid: false,
-  //     error: "商家尚未通過審核，無法發佈工作",
-  //     statusCode: 403
-  //   };
-  // }
-
-  return {
-    isValid: true,
-    employer
-  };
 };
 
 // 構建工作數據物件
@@ -250,21 +221,18 @@ router.get("/getFile/:filename", async ({ params, response }) => {
 router.post(
   "/create",
   authenticated,
+  requireEmployer,
+  requireApprovedEmployer,
   uploadEnvironmentPhotos,
   validate(createGigSchema),
-  async ({ user, body, file: reqFile, response }) => {
+  async ({ user, body, file, response }) => {
+    const reqFile = file || {};
     let uploadedFiles: any[] = [];
     
     try {
-      // 驗證商家權限
-      const validationResult = await validateEmployer(user);
-      if (!validationResult.isValid) {
-        return response.status(validationResult.statusCode).send(validationResult.error);
-      }
-
       // 處理照片上傳
-      const { environmentPhotosInfo, uploadedFiles: files } = await handlePhotoUpload(reqFile);
-      uploadedFiles = files;
+      const { environmentPhotosInfo, uploadedFiles: filesList } = await handlePhotoUpload(reqFile);
+      uploadedFiles = filesList;
 
       // 構建工作數據
       const gigData = buildGigData(body, user, environmentPhotosInfo);
@@ -298,8 +266,7 @@ router.post(
       
       return response.status(500).send("伺服器內部錯誤");
     } finally {
-      // 清理臨時文件
-      await cleanupTempFiles(uploadedFiles);
+      cleanupTempFiles(uploadedFiles);
     }
   }
 );
@@ -308,14 +275,9 @@ router.post(
 router.get(
   "/my-gigs",
   authenticated,
+  requireEmployer,
   async ({ user, response, query }) => {
     try {
-      // 驗證商家權限
-      const validationResult = await validateEmployer(user);
-      if (!validationResult.isValid) {
-        return response.status(validationResult.statusCode).send(validationResult.error);
-      }
-
       const page = parseInt(query.page) || 1;
       const limit = parseInt(query.limit) || 10;
       const offset = (page - 1) * limit;
@@ -357,50 +319,25 @@ router.get(
 router.get(
   "/:gigId",
   authenticated,
+  requireEmployer,
   async ({ user, params, response }) => {
     try {
       const { gigId } = params;
 
       const gig = await dbClient.query.gigs.findFirst({
-        where: eq(gigs.gigId, gigId),
-        with: {
-          gigApplications: {
-            with: {
-              worker: {
-                columns: {
-                  workerId: true,
-                  firstName: true,
-                  lastName: true,
-                  email: true,
-                  phoneNumber: true,
-                  highestEducation: true,
-                  schoolName: true,
-                  major: true,
-                },
-              },
-            },
-          },
-        },
+        where: and(eq(gigs.gigId, gigId), eq(gigs.employerId, user.employerId))
       });
 
       if (!gig) {
-        return response.status(404).send("工作不存在");
+        return response.status(404).send("工作不存在或無權限查看");
       }
 
-      // 如果是商家，只能查看自己的工作詳情
-      if (user.role === Role.EMPLOYER && gig.employerId !== user.employerId) {
-        return response.status(403).send("無權查看此工作");
-      }
-
-      // 添加申請計數統計
-      const gigWithCounts = {
+      const gigWithPhotos = {
         ...gig,
         environmentPhotos: formatEnvironmentPhotos(typeof gig.environmentPhotos === 'string' ? gig.environmentPhotos : null),
-        applicationCount: gig.gigApplications ? gig.gigApplications.length : 0,
-        pendingApplications: gig.gigApplications ? gig.gigApplications.filter(app => app.status === "pending").length : 0,
       };
 
-      return response.status(200).send(gigWithCounts);
+      return response.status(200).send(gigWithPhotos);
     } catch (error) {
       console.error("獲取工作詳情時出錯:", error);
       return response.status(500).send("伺服器內部錯誤");
@@ -412,21 +349,18 @@ router.get(
 router.put(
   "/:gigId",
   authenticated,
+  requireEmployer,
+  requireApprovedEmployer,
   uploadEnvironmentPhotos,
   validate(updateGigSchema),
-  async ({ user, params, body, file: reqFile, response }) => {
+  async ({ user, params, body, file, response }) => {
+    const reqFile = file || {};
     let uploadedFiles: any[] = [];
     
     try {
-      // 驗證商家權限
-      const validationResult = await validateEmployer(user);
-      if (!validationResult.isValid) {
-        return response.status(validationResult.statusCode).send(validationResult.error);
-      }
-
       const { gigId } = params;
 
-      // 檢查工作是否存在且屬於該商家
+      // 處理照片上傳（如果有新照片上傳）
       const existingGig = await dbClient.query.gigs.findFirst({
         where: and(eq(gigs.gigId, gigId), eq(gigs.employerId, user.employerId)),
       });
@@ -435,10 +369,9 @@ router.put(
         return response.status(404).send("工作不存在或無權限修改");
       }
 
-      // 處理照片上傳（如果有新照片上傳）
       const existingPhotos = formatEnvironmentPhotos(typeof existingGig.environmentPhotos === 'string' ? existingGig.environmentPhotos : null) || [];
-      const { environmentPhotosInfo, uploadedFiles: files, addedCount, totalCount, message } = await handlePhotoUpload(reqFile, existingPhotos);
-      uploadedFiles = files;
+      const { environmentPhotosInfo, uploadedFiles: filesList, addedCount, totalCount, message } = await handlePhotoUpload(reqFile, existingPhotos);
+      uploadedFiles = filesList;
 
       // 構建更新數據
       const updateData: any = {};
@@ -494,8 +427,7 @@ router.put(
       
       return response.status(500).send("伺服器內部錯誤");
     } finally {
-      // 清理臨時文件
-      await cleanupTempFiles(uploadedFiles);
+      cleanupTempFiles(uploadedFiles);
     }
   }
 );
@@ -504,14 +436,10 @@ router.put(
 router.patch(
   "/:gigId/toggle-status",
   authenticated,
+  requireEmployer,
+  requireApprovedEmployer,
   async ({ user, params, response }) => {
     try {
-      // 驗證商家權限
-      const validationResult = await validateEmployer(user);
-      if (!validationResult.isValid) {
-        return response.status(validationResult.statusCode).send(validationResult.error);
-      }
-
       const { gigId } = params;
 
       const existingGig = await dbClient.query.gigs.findFirst({
@@ -546,14 +474,10 @@ router.patch(
 router.delete(
   "/:gigId",
   authenticated,
+  requireEmployer,
+  requireApprovedEmployer,
   async ({ user, params, response }) => {
     try {
-      // 驗證商家權限
-      const validationResult = await validateEmployer(user);
-      if (!validationResult.isValid) {
-        return response.status(validationResult.statusCode).send(validationResult.error);
-      }
-
       const { gigId } = params;
 
       const existingGig = await dbClient.query.gigs.findFirst({

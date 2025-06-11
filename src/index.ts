@@ -14,41 +14,41 @@ initStrategy();
 
 const app = nhttp({ stackError: false });
 
-app.use(cors({ credentials: true }));
+app.use(cors({ origin: 'http://localhost:4321/', credentials: true }));
 
 app.use(
-  session({
-    cookie: { maxAge: 60000 * 60 * 24, secure: true },
-    store: new RedisStore({
-      client: new Redis(6379),
-      prefix: "session:",
-    }),
-    resave: false,
-    saveUninitialized: false,
-    secret: process.env.SESSIONSECRET,
-  }),
+	session({
+		cookie: { maxAge: 60000 * 60 * 24, secure: true },
+		store: new RedisStore({
+			client: new Redis(6379),
+			prefix: "session:",
+		}),
+		resave: false,
+		saveUninitialized: false,
+		secret: process.env.SESSIONSECRET,
+	}),
 );
 
 app.use(passport.initialize());
 app.use(passport.session());
 
 app.get("/", () => {
-  return "Hello World!";
+	return "Hello World!";
 });
 
 app.get("/hashing/:password", ({ params }) => {
-  const { password } = params;
-  return hash(password, argon2Config);
+	const { password } = params;
+	return hash(password, argon2Config);
 });
 
 for await (const file of new Glob(`${__dirname}/Routes/**/*.ts`).scan({
-  absolute: true,
+	absolute: true,
 })) {
-  const module = await import(file);
-  const { path, router }: IRouter = module.default;
-  app.use(path, router);
+	const module = await import(file);
+	const { path, router }: IRouter = module.default;
+	app.use(path, router);
 }
 
 app.listen(3000, () => {
-  console.log("Server is ready");
+	console.log("Server is ready");
 });

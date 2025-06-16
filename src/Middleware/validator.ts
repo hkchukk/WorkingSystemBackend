@@ -1,5 +1,7 @@
 import { z } from "@nhttp/zod";
 
+
+/* user route */
 export const workerSignupSchema = z.object({
   email: z.string().email("Invalid email format"),
   password: z
@@ -47,6 +49,45 @@ export const employerSignupSchema = z.object({
     })
     .optional(),
 });
+
+export const updateWorkerProfileSchema = z.object({
+  firstName: z.string().optional(),
+  lastName: z.string().optional(),
+  phoneNumber: z
+    .string()
+    .regex(/^(09\d{8}|\+8869\d{8}|0\d{1,2}-?\d{6,8})$/, "Invalid phone number")
+    .optional(),
+  highestEducation: z
+    .enum(["高中", "大學", "碩士", "博士", "其他"])
+    .optional(),
+  schoolName: z.string().optional(),
+  major: z.string().optional(),
+  studyStatus: z.enum(["就讀中", "已畢業", "肄業"]).optional(),
+  certificates: z.array(z.string()).optional(),
+});
+
+export const updateEmployerProfileSchema = z.object({
+  employerName: z.string().optional(),
+  branchName: z.string().optional(),
+  industryType: z
+    .enum(["餐飲", "批發/零售", "倉儲運輸", "展場活動", "其他"])
+    .optional(),
+  identificationType: z.enum(["businessNo", "personalId"]).optional(),
+  address: z.string().optional(),
+  phoneNumber: z
+    .string()
+    .regex(/^(09\d{8}|\+8869\d{8}|0\d{1,2}-?\d{6,8})$/, "Invalid phone number")
+    .optional(),
+  contactInfo: z
+    .object({
+      contactPerson: z.string().optional(),
+      contactEmail: z.string().email().optional(),
+      contactPhone: z.string().optional(),
+    })
+    .optional(),
+});
+
+/* end user route */
 
 // 工作發佈的驗證 Schema
 export const createGigSchema = z.object({

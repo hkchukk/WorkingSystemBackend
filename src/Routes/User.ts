@@ -12,6 +12,8 @@ import validate from "@nhttp/zod";
 import {
   employerSignupSchema,
   workerSignupSchema,
+  updateWorkerProfileSchema,
+  updateEmployerProfileSchema
 } from "../Middleware/validator.ts";
 import { uploadDocument } from "../Middleware/uploadFile.ts";
 import { S3Client, S3File } from "bun";
@@ -251,6 +253,65 @@ router.get("/profile", authenticated, async ({ user, response }) => {
   }
 
   return response.status(400).send("Invalid role");
+});
+
+router.put("/update/profile", authenticated, async ({ body, response, request, user }) => {
+  try {
+    if (user.role === "worker") {
+      const validationResult = updateWorkerProfileSchema.safeParse(body);
+
+      if (!validationResult.success) {
+        return response
+          .status(400)
+          .json({
+          message: "Validation failed",
+          errors: validationResult.error.flatten(),
+        });
+      }
+
+      const validatedData = validationResult.data;
+
+      const updatedWorker = await dbClient
+        .update(workers)
+        .set({ ...validatedData, updatedAt: new Date() })
+        .where(eq(workers.workerId, user.workerId))
+        .returning();
+
+      const { password, ...workerData } = updatedWorker[0];
+      return response.status(200).json(workerData);
+
+    } else if (user.role === "employer") {
+      const validationResult = updateEmployerProfileSchema.safeParse(body);
+
+      if (!validationResult.success) {
+        return response.status(400).json({
+          message: "Validation failed",
+          errors: validationResult.error.flatten(),
+        });
+      }
+
+      const validatedData  = validationResult.data;
+
+      const updatedEmployer = await dbClient
+        .update(employers)
+        .set({ ...validatedData, updatedAt: new Date() })
+        .where(eq(employers.employerId, user.employerId))
+        .returning();
+
+      if (updatedEmployer.length === 0) {
+        return response.status(404).send("Employer not found");
+      }
+
+      const { password: empPassword, ...employerData } = updatedEmployer[0];
+      return response.status(200).json(employerData);
+
+    } else {
+      return response.status(400).send("Invalid user role for profile update");
+    }
+  } catch (error) {
+    console.error("Error updating profile:", error);
+    return response.status(500).send("Internal server error");
+  }
 });
 
 export default { path: "/user", router } as IRouter;

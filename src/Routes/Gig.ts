@@ -443,7 +443,7 @@ router.put(
 
 			// updateData.updatedAt = new Date();
 
-			dbClient
+			await dbClient
 				.update(gigs)
 				.set({
 					...body,

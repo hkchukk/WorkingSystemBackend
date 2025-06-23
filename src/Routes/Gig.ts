@@ -12,6 +12,7 @@ import validate from "@nhttp/zod";
 import { createGigSchema, updateGigSchema } from "../Middleware/validator.ts";
 import { uploadEnvironmentPhotos } from "../Middleware/uploadFile.ts";
 import { S3Client } from "bun";
+import moment from "moment";
 
 const router = new Router();
 
@@ -448,6 +449,18 @@ router.put(
 				.set({
 					...body,
 					updatedAt: new Date(),
+					dateStart: body.dateStart
+						? moment(body.dateStart).format("YYYY-MM-DD")
+						: undefined,
+					dateEnd: body.dateEnd
+						? moment(body.dateEnd).format("YYYY-MM-DD")
+						: undefined,
+					publishedAt: body.publishedAt
+						? moment(body.publishedAt).format("YYYY-MM-DD")
+						: undefined,
+					unlistedAt: body.unlistedAt
+						? moment(body.unlistedAt).format("YYYY-MM-DD")
+						: undefined,
 					environmentPhotos: addedCount > 0 ? environmentPhotosInfo : undefined,
 				})
 				.where(eq(gigs.gigId, gigId));

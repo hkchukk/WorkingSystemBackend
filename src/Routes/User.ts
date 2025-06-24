@@ -16,7 +16,7 @@ import {
   updateEmployerProfileSchema
 } from "../Middleware/validator.ts";
 import { uploadDocument } from "../Middleware/uploadFile.ts";
-import { S3Client, S3File } from "bun";
+import { file, S3Client, S3File } from "bun";
 
 const router = new Router();
 
@@ -313,5 +313,90 @@ router.put("/update/profile", authenticated, async ({ body, response, request, u
     return response.status(500).send("Internal server error");
   }
 });
+
+router.put(
+  "/update/identification", 
+  authenticated,
+  uploadDocument, 
+  async({ headers, body, file: reqFile, response, user }) => {
+    let files = null;
+    try {
+      if (reqFile.length == 0) {
+        return response.status(400).send("No file uploaded");
+      }
+
+      if(body.identificationType == "businessNo" && reqFile.verficationDocument) {
+        files = reqFile.verficationDocument.length == undefined ? [reqFile.verficationDocument] : reqFile.verficationDocument;
+      }else if(body.identificationType == "personalId" && reqFile.identificationDocument) {
+        files = reqFile.identificationDocument.length == undefined ? [reqFile.identificationDocument] : reqFile.identificationDocument;
+      }else{
+        return response.status(400).send("Invalid identification document");
+      }
+
+      if( user.role == "employer" && headers.get("platform") === "web-employer" ) {
+        const filesInfo: {
+          originalName: string;
+          type: string;
+          r2Name: string;
+        }[] = files.map((file: { name: string; type: string; filename: string }) => ({
+          originalName: file.name as string,
+          type: file.type as string,
+          r2Name: file.filename as string,
+        }));
+
+        const client = new S3Client({
+          region: "auto",
+          accessKeyId: process.env.R2ACCESSKEYID,
+          secretAccessKey: process.env.R2SECRETACCESSKEY,
+          endpoint: process.env.R2ENDPOINT,
+          bucket: "backend-files",
+          retry: 1,
+        });
+
+        const deleteFiles = JSON.parse(user.verificationDocuments).map(
+          (file: { r2Name: string }) => 
+            client.delete(`documents/${body.identificationType}/${file.r2Name}`)
+        );
+
+        await Promise.all(deleteFiles);
+
+        await Promise.all(
+          files.map(async (file: { path: string; filename: string; name: string }) => {
+            const currentFile = Bun.file(file.path);
+            if (!currentFile.exists()) {
+              throw new Error(`Verification document file not found: ${file.name}`);
+            }
+            await client.write(
+              `documents/${body.identificationType}/${file.filename}`,
+              currentFile,
+            );
+            console.log(`File ${file.name} uploaded successfully`);
+          }),
+        );
+
+        await dbClient
+          .update(employers)
+          .set({
+            identificationType: body.identificationType,
+            identificationNumber: body.identificationNumber,
+            verificationDocuments: JSON.stringify(filesInfo),
+            updatedAt: new Date(),
+          })
+          .where(eq(employers.employerId, user.employerId))
+          .returning();
+
+        return response.status(200).send("Identification updated successfully");
+      }
+      return response.status(400).send("Invalid user role for identification update");
+    }
+    catch (error) {
+      console.error("Error updating identification:", error);
+      return response.status(500).send("Internal server error");
+    }
+    finally {
+      cleanupTempFiles(files);
+    }
+  }
+);
 
 export default { path: "/user", router } as IRouter;

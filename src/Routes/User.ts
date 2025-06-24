@@ -156,24 +156,6 @@ router.post(
 
         const hashedPassword = await argon2hash(password, argon2Config);
 
-        const insertedUsers = await dbClient
-          .insert(employers)
-          .values({
-            email,
-            password: hashedPassword,
-            employerName,
-            branchName,
-            industryType,
-            address,
-            phoneNumber,
-            identificationType,
-            identificationNumber,
-            verificationDocuments: JSON.stringify(filesInfo),
-            employerPhoto,
-            contactInfo,
-          })
-          .returning();
-
         const client = new S3Client({
           region: "auto",
           accessKeyId: process.env.R2ACCESSKEYID,
@@ -200,6 +182,24 @@ router.post(
             },
           ),
         );
+
+                const insertedUsers = await dbClient
+          .insert(employers)
+          .values({
+            email,
+            password: hashedPassword,
+            employerName,
+            branchName,
+            industryType,
+            address,
+            phoneNumber,
+            identificationType,
+            identificationNumber,
+            verificationDocuments: JSON.stringify(filesInfo),
+            employerPhoto,
+            contactInfo,
+          })
+          .returning();
 
         const newUser = body;
 

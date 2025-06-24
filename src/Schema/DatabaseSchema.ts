@@ -7,6 +7,7 @@ import {
   integer,
   json,
   date,
+  jsonb,
 } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
 import { nanoid } from "@sitnik/nanoid";
@@ -23,6 +24,8 @@ export const workers = pgTable("workers", {
   firstName: text("first_name").notNull(),
   lastName: text("last_name").notNull(),
   phoneNumber: text("phone_number"),
+
+  profilePhoto: json("profile_photo").default([]), 
 
   // === 新增：學歷資訊 ===
   highestEducation: varchar("highest_education", {
@@ -91,7 +94,7 @@ export const employers = pgTable("employers", {
   verificationDocuments: json("verification_documents"), // e.g. ["https://...","https://..."]
 
   // 5) 商家大頭照
-  employerPhoto: text("employer_photo"),
+  employerPhoto: json("employer_photo"),
 
   // 聯繫方式 (可放電話 + email 組合)
   contactInfo: json("contact_info"),

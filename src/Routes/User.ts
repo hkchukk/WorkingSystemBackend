@@ -15,7 +15,7 @@ import {
   updateWorkerProfileSchema,
   updateEmployerProfileSchema
 } from "../Middleware/validator.ts";
-import { uploadDocument } from "../Middleware/uploadFile.ts";
+import { uploadDocument, uploadProfilePhoto } from "../Middleware/uploadFile.ts";
 import { file, S3Client, S3File } from "bun";
 
 const router = new Router();
@@ -183,7 +183,7 @@ router.post(
           ),
         );
 
-                const insertedUsers = await dbClient
+          const insertedUsers = await dbClient
           .insert(employers)
           .values({
             email,
@@ -382,8 +382,7 @@ router.put(
             verificationDocuments: JSON.stringify(filesInfo),
             updatedAt: new Date(),
           })
-          .where(eq(employers.employerId, user.employerId))
-          .returning();
+          .where(eq(employers.employerId, user.employerId));
 
         return response.status(200).send("Identification updated successfully");
       }
@@ -399,4 +398,84 @@ router.put(
   }
 );
 
+router.put(
+  "/update/profilePhoto",
+  authenticated,
+  uploadProfilePhoto,
+  async ({ headers, file: reqFile, user, response }) => {
+    try {
+      if (reqFile.length === 0) {
+        return response.status(400).send("No file uploaded");
+      }
+
+      const client = new S3Client({
+        region: "auto",
+        accessKeyId: process.env.R2ACCESSKEYID,
+        secretAccessKey: process.env.R2SECRETACCESSKEY,
+        endpoint: process.env.R2ENDPOINT,
+        bucket: "backend-files",
+        retry: 1,
+      });
+
+      const filesInfo: {
+          originalName: string;
+          type: string;
+          r2Name: string;
+        } = {
+          originalName: reqFile.profilePhoto.name,
+          type: reqFile.profilePhoto.type,
+          r2Name: reqFile.profilePhoto.filename,
+        }
+
+      if (user.role === "worker" && headers.get("platform") === "mobile") {
+        if( user.profilePhoto.length > 0 ){ 
+          await client.delete(`profile-photos/workers/${user.profilePhoto.r2Name}`);
+        }
+
+        await client.write(
+          `profile-photos/workers/${filesInfo.r2Name}`,
+          Bun.file(reqFile.profilePhoto.path),
+        );
+
+        await dbClient
+          .update(workers)
+          .set({
+            profilePhoto: filesInfo,
+            updatedAt: new Date(),
+          })
+          .where(eq(workers.workerId, user.workerId));
+
+        return response.status(200).send("Profile photo updated successfully");
+      
+      } else if (user.role === "employer" && headers.get("platform") === "web-employer") {
+        if( user.employerPhoto.length > 0 ){ 
+          await client.delete(`profile-photos/employers/${user.employerPhoto.r2Name}`);
+        }
+
+        await client.delete(`profile-photos/employers/${user.employerPhoto.r2Name}`);
+        await client.write(
+          `profile-photos/employers/${filesInfo.r2Name}`,
+          Bun.file(reqFile.profilePhoto.path),
+        );
+
+        await dbClient
+          .update(employers)
+          .set({
+            employerPhoto: filesInfo,
+            updatedAt: new Date(),
+          })
+          .where(eq(employers.employerId, user.employerId));
+
+        return response.status(200).send("Profile photo updated successfully");
+      }
+
+      return response.status(400).send("Platform requiered or mismatch");
+    } catch (error) {
+      return response.status(500).send("Internal server error");
+    } finally {
+      cleanupTempFiles([reqFile.profilePhoto]);
+    }
+  }
+);
+        
 export default { path: "/user", router } as IRouter;

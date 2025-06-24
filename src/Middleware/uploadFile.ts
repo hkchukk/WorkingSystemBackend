@@ -32,6 +32,22 @@ export const uploadDocument = multipart.upload(
   ],
 );
 
+export const uploadProfilePhoto = multipart.upload([
+  {
+    name: "profilePhoto",
+    dest: "src/uploads/temp",
+    maxSize: "2mb",
+    maxCount: 1,
+    accept: ["jpg", "jpeg", "png", "webp"],
+    callback: (file) => {
+      const timestamp = Date.now();
+      const randomSuffix = Math.random().toString(36).substring(2, 8);
+      const extension = file.name.split(".").pop();
+      file.filename = `profile_${timestamp}_${randomSuffix}.${extension}`;
+    },
+  },
+]);
+
 export const uploadEnvironmentPhotos = multipart.upload([
   {
     name: "environmentPhotos",

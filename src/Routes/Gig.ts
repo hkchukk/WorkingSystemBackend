@@ -128,26 +128,20 @@ const cleanupTempFiles = async (uploadedFiles: any[]) => {
 };
 
 // 處理環境照片數據格式的輔助函數
-const formatEnvironmentPhotos = (environmentPhotos: string | null) => {
+const formatEnvironmentPhotos = (environmentPhotos: any) => {
 	if (!environmentPhotos) return null;
 
-	try {
-		const photos = JSON.parse(environmentPhotos);
-		if (Array.isArray(photos)) {
-			// 確保數據庫中最多只有 3 張照片
-			const limitedPhotos = photos.slice(0, 3);
-			return limitedPhotos.map((photo: any) => ({
-				originalName: photo.originalName,
-				type: photo.type,
-				filename: photo.filename,
-				size: photo.size,
-			}));
-		}
-		return photos;
-	} catch (error) {
-		console.error("解析環境照片數據時出錯:", error);
-		return null;
+	if (Array.isArray(environmentPhotos)) {
+		// 確保數據庫中最多只有 3 張照片
+		const limitedPhotos = environmentPhotos.slice(0, 3);
+		return limitedPhotos.map((photo: any) => ({
+			originalName: photo.originalName,
+			type: photo.type,
+			filename: photo.filename,
+			size: photo.size,
+		}));
 	}
+	return environmentPhotos;
 };
 
 // 構建工作數據物件
@@ -174,29 +168,27 @@ const buildGigData = (body: any, user: any, environmentPhotosInfo: any) => {
 	return {
 		employerId: user.employerId,
 		title,
-		description: description ? JSON.stringify(description) : null,
-		dateStart: dateStart
-			? new Date(dateStart).toISOString().split("T")[0]
-			: new Date().toISOString().split("T")[0],
-		dateEnd: dateEnd ? new Date(dateEnd).toISOString().split("T")[0] : null,
+		description,
+		dateStart: dateStart ? moment(dateStart).format("YYYY-MM-DD") : null,
+		dateEnd: dateEnd ? moment(dateEnd).format("YYYY-MM-DD") : null,
 		timeStart,
 		timeEnd,
-		requirements: requirements ? JSON.stringify(requirements) : null,
+		requirements,
 		hourlyRate,
 		city,
 		district,
 		address,
 		contactPerson,
-		contactPhone: contactPhone || null,
-		contactEmail: contactEmail || null,
+		contactPhone,
+		contactEmail,
 		environmentPhotos: environmentPhotosInfo
-			? JSON.stringify(environmentPhotosInfo)
+			? environmentPhotosInfo
 			: null,
 		publishedAt: publishedAt
-			? new Date(publishedAt).toISOString().split("T")[0]
-			: new Date().toISOString().split("T")[0],
+			? moment(publishedAt).format("YYYY-MM-DD")
+			: moment().format("YYYY-MM-DD"),
 		unlistedAt: unlistedAt
-			? new Date(unlistedAt).toISOString().split("T")[0]
+			? moment(unlistedAt).format("YYYY-MM-DD")
 			: null,
 	};
 };
@@ -291,9 +283,9 @@ router.get(
 	requireEmployer,
 	async ({ user, response, query }) => {
 		try {
-			const page = Number.parseInt(query.page) || 1;
-			const limit = Number.parseInt(query.limit) || 10;
-			const offset = (page - 1) * limit;
+			const { limit = 10, offset = 0 } = query;
+			const requestLimit = Number.parseInt(limit);
+			const requestOffset = Number.parseInt(offset);
 
 			const myGigs = await dbClient.query.gigs.findMany({
 				where: eq(gigs.employerId, user.employerId),
@@ -309,16 +301,21 @@ router.get(
 					unlistedAt: true,
 					isActive: true,
 				},
-				limit,
-				offset,
+				limit: requestLimit + 1, // 多查一筆來確認是否有更多資料
+				offset: requestOffset,
 			});
 
+			// 檢查是否有更多資料
+			const hasMore = myGigs.length > requestLimit;
+			const returnGigs = hasMore ? myGigs.slice(0, requestLimit) : myGigs;
+
 			return response.status(200).send({
-				gigs: myGigs,
+				gigs: returnGigs,
 				pagination: {
-					page,
-					limit,
-					hasMore: myGigs.length === limit,
+					limit: requestLimit,
+					offset: requestOffset,
+					hasMore,
+					returned: returnGigs.length,
 				},
 			});
 		} catch (error) {
@@ -333,10 +330,31 @@ router.get(
 	"/:gigId",
 	authenticated,
 	requireEmployer,
-	async ({ user, params, response }) => {
+	async ({ user, params, query, response }) => {
 		try {
 			const { gigId } = params;
+			const { application, status, limit = 10, offset = 0 } = query;
 
+			// 如果沒有要求整合申請記錄，使用簡單查詢
+			if (application !== "true") {
+				const gig = await dbClient.query.gigs.findFirst({
+					where: and(eq(gigs.gigId, gigId), eq(gigs.employerId, user.employerId)),
+				});
+
+				if (!gig) {
+					return response.status(404).send("工作不存在或無權限查看");
+				}
+
+				return response.status(200).send({
+					...gig,
+					environmentPhotos: formatEnvironmentPhotos(gig.environmentPhotos),
+				});
+			}
+
+			const requestLimit = Number.parseInt(limit);
+			const requestOffset = Number.parseInt(offset);
+
+			// 先查詢工作詳情
 			const gig = await dbClient.query.gigs.findFirst({
 				where: and(eq(gigs.gigId, gigId), eq(gigs.employerId, user.employerId)),
 			});
@@ -345,16 +363,52 @@ router.get(
 				return response.status(404).send("工作不存在或無權限查看");
 			}
 
-			const gigWithPhotos = {
-				...gig,
-				environmentPhotos: formatEnvironmentPhotos(
-					typeof gig.environmentPhotos === "string"
-						? gig.environmentPhotos
-						: null,
-				),
-			};
+			// 建立申請記錄查詢條件
+			const whereConditions = [eq(gigApplications.gigId, gigId)];
+			if (status && ["pending", "approved", "rejected", "cancelled"].includes(status)) {
+				whereConditions.push(eq(gigApplications.status, status));
+			}
 
-			return response.status(200).send(gigWithPhotos);
+			// 查詢申請記錄（在資料庫層面分頁，多查一筆來判斷 hasMore）
+			const applications = await dbClient.query.gigApplications.findMany({
+				where: and(...whereConditions),
+				with: {
+					worker: true,
+				},
+				orderBy: [desc(gigApplications.createdAt)],
+				limit: requestLimit + 1, // 多查一筆來判斷 hasMore
+				offset: requestOffset,
+			});
+
+			// 判斷是否有更多資料
+			const hasMore = applications.length > requestLimit;
+			const paginatedApplications = hasMore ? applications.slice(0, requestLimit) : applications;
+
+			// 整合回應
+			return response.status(200).send({
+				...gig,
+				environmentPhotos: formatEnvironmentPhotos(gig.environmentPhotos),
+				applications: {
+					data: paginatedApplications.map(app => ({
+						applicationId: app.applicationId,
+						workerId: app.workerId,
+						workerName: `${app.worker.firstName} ${app.worker.lastName}`,
+						workerEmail: app.worker.email,
+						workerPhone: app.worker.phoneNumber,
+						workerEducation: app.worker.highestEducation,
+						workerSchool: app.worker.schoolName,
+						workerMajor: app.worker.major,
+						status: app.status,
+						appliedAt: app.createdAt,
+					})),
+					pagination: {
+						limit: requestLimit,
+						offset: requestOffset,
+						hasMore,
+						returned: paginatedApplications.length,
+					},
+				},
+			});
 		} catch (error) {
 			console.error("獲取工作詳情時出錯:", error);
 			return response.status(500).send("伺服器內部錯誤");
@@ -386,12 +440,7 @@ router.put(
 				return response.status(404).send("工作不存在或無權限修改");
 			}
 
-			const existingPhotos =
-				formatEnvironmentPhotos(
-					typeof existingGig.environmentPhotos === "string"
-						? existingGig.environmentPhotos
-						: null,
-				) || [];
+			const existingPhotos = formatEnvironmentPhotos(existingGig.environmentPhotos) || [];
 			const {
 				environmentPhotosInfo,
 				uploadedFiles: filesList,
@@ -443,6 +492,7 @@ router.put(
 			// if (body.isActive !== undefined) updateData.isActive = body.isActive;
 
 			// updateData.updatedAt = new Date();
+			// await dbClient.update(gigs).set(updateData).where(eq(gigs.gigId, gigId));
 
 			await dbClient
 				.update(gigs)
@@ -464,8 +514,6 @@ router.put(
 					environmentPhotos: addedCount > 0 ? environmentPhotosInfo : undefined,
 				})
 				.where(eq(gigs.gigId, gigId));
-
-			// await dbClient.update(gigs).set(updateData).where(eq(gigs.gigId, gigId));
 
 			// 只有在有照片相關操作時才顯示照片訊息
 			const hasPhotoOperation = reqFile?.environmentPhotos;
@@ -586,19 +634,17 @@ router.delete(
 // 獲取所有可用工作（給打工者查看）
 router.get("/", async ({ query, response }) => {
 	try {
-		const page = Number.parseInt(query.page) || 1;
-		const limit = Number.parseInt(query.limit) || 10;
-		const offset = (page - 1) * limit;
-		const city = query.city;
-		const district = query.district;
-		const minRate = query.minRate ? Number.parseInt(query.minRate) : null;
-		const maxRate = query.maxRate ? Number.parseInt(query.maxRate) : null;
+		const { limit = 10, offset = 0, city, district, minRate, maxRate } = query;
+		const requestLimit = Number.parseInt(limit);
+		const requestOffset = Number.parseInt(offset);
+		const minRateFilter = minRate ? Number.parseInt(minRate) : null;
+		const maxRateFilter = maxRate ? Number.parseInt(maxRate) : null;
 
 		const availableGigs = await dbClient.query.gigs.findMany({
 			where: eq(gigs.isActive, true),
 			orderBy: [desc(gigs.createdAt)],
-			limit,
-			offset,
+			limit: requestLimit + 1, // 多查一筆來確認是否有更多資料
+			offset: requestOffset,
 			with: {
 				employer: {
 					columns: {
@@ -625,36 +671,37 @@ router.get("/", async ({ query, response }) => {
 			);
 		}
 
-		if (minRate) {
-			filteredGigs = filteredGigs.filter((gig) => gig.hourlyRate >= minRate);
+		if (minRateFilter) {
+			filteredGigs = filteredGigs.filter((gig) => gig.hourlyRate >= minRateFilter);
 		}
 
-		if (maxRate) {
-			filteredGigs = filteredGigs.filter((gig) => gig.hourlyRate <= maxRate);
+		if (maxRateFilter) {
+			filteredGigs = filteredGigs.filter((gig) => gig.hourlyRate <= maxRateFilter);
 		}
+
+		// 檢查是否有更多資料（考慮過濾後的結果）
+		const hasMore = filteredGigs.length > requestLimit;
+		const returnGigs = hasMore ? filteredGigs.slice(0, requestLimit) : filteredGigs;
 
 		// 格式化環境照片數據
-		const formattedGigs = filteredGigs.map((gig) => ({
+		const formattedGigs = returnGigs.map((gig) => ({
 			...gig,
-			environmentPhotos: formatEnvironmentPhotos(
-				typeof gig.environmentPhotos === "string"
-					? gig.environmentPhotos
-					: null,
-			),
+			environmentPhotos: formatEnvironmentPhotos(gig.environmentPhotos),
 		}));
 
 		return response.status(200).send({
 			gigs: formattedGigs,
 			pagination: {
-				page,
-				limit,
-				hasMore: filteredGigs.length === limit,
+				limit: requestLimit,
+				offset: requestOffset,
+				hasMore,
+				returned: returnGigs.length,
 			},
 			filters: {
 				city,
 				district,
-				minRate,
-				maxRate,
+				minRate: minRateFilter,
+				maxRate: maxRateFilter,
 			},
 		});
 	} catch (error) {

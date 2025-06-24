@@ -171,7 +171,7 @@ router.post("/cancel/:applicationId", authenticated, requireWorker, async ({ use
  */
 router.get("/my-applications", authenticated, requireWorker, async ({ user, query, response }) => {
   try {
-    const { status, limit = 20, offset = 0 } = query;
+    const { status, limit = 10, offset = 0 } = query;
 
     // 建立查詢條件
     const whereConditions = [eq(gigApplications.workerId, user.workerId)];
@@ -180,8 +180,8 @@ router.get("/my-applications", authenticated, requireWorker, async ({ user, quer
       whereConditions.push(eq(gigApplications.status, status));
     }
 
-    const requestLimit = parseInt(limit as string);
-    const requestOffset = parseInt(offset as string);
+    const requestLimit = Number.parseInt(limit);
+    const requestOffset = Number.parseInt(offset);
 
     // 查詢申請記錄（多查一筆來判斷是否還有更多數據）
     const applications = await dbClient.query.gigApplications.findMany({
@@ -243,7 +243,7 @@ router.get("/my-applications", authenticated, requireWorker, async ({ user, quer
 router.get("/gig/:gigId", authenticated, requireEmployer, async ({ user, params, query, response }) => {
   try {
     const { gigId } = params;
-    const { status, limit = 20, offset = 0 } = query;
+    const { status, limit = 10, offset = 0 } = query;
 
     // 檢查工作權限
     const gig = await dbClient.query.gigs.findFirst({
@@ -263,8 +263,8 @@ router.get("/gig/:gigId", authenticated, requireEmployer, async ({ user, params,
       whereConditions.push(eq(gigApplications.status, status));
     }
 
-    const requestLimit = parseInt(limit as string);
-    const requestOffset = parseInt(offset as string);
+    const requestLimit = Number.parseInt(limit);
+    const requestOffset = Number.parseInt(offset);
 
     // 查詢申請記錄（多查一筆來判斷是否還有更多數據）
     const applications = await dbClient.query.gigApplications.findMany({
@@ -404,7 +404,7 @@ router.put(
  */
 router.get("/gig/all", authenticated, requireEmployer, async ({ user, query, response }) => {
   try {
-    const { status, limit = 20, offset = 0 } = query;
+    const { status, limit = 10, offset = 0 } = query;
 
     // 先查詢該商家的所有工作 ID
     const userGigs = await dbClient.query.gigs.findMany({
@@ -444,8 +444,8 @@ router.get("/gig/all", authenticated, requireEmployer, async ({ user, query, res
       applicationWhereConditions.push(applicationStatusConditions);
     }
 
-    const requestLimit = parseInt(limit as string);
-    const requestOffset = parseInt(offset as string);
+    const requestLimit = Number.parseInt(limit);
+    const requestOffset = Number.parseInt(offset);
 
     // 查詢申請記錄
     const applications = await dbClient.query.gigApplications.findMany({

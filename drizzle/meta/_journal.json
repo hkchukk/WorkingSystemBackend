@@ -15,6 +15,13 @@
       "when": 1750782600496,
       "tag": "0001_rapid_argent",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1750785069222,
+      "tag": "0002_known_la_nuit",
+      "breakpoints": true
     }
   ]
 }

@@ -1,6 +1,6 @@
 import session from "express-session";
 import passport from "passport";
-import { nhttp, multipart } from "@nhttp/nhttp";
+import { nhttp } from "@nhttp/nhttp";
 import cors from "@nhttp/nhttp/cors";
 import Redis from "ioredis";
 import { RedisStore } from "connect-redis";
@@ -9,6 +9,7 @@ import type IRouter from "./Interfaces/IRouter.ts";
 import { hash } from "@node-rs/argon2";
 import { argon2Config } from "./config.ts";
 import { Glob } from "bun";
+import redisClient from "./Client/RedisClient.ts";
 
 initStrategy();
 
@@ -49,6 +50,14 @@ for await (const file of new Glob(`${__dirname}/Routes/**/*.ts`).scan({
 	app.use(path, router);
 }
 
-app.listen(3000, () => {
-	console.log("Server is ready");
+app.listen(3000, async () => {
+	console.log("🚀 Server is ready on port 3000");
+	
+	// 初始化 Redis 連接（用於快取）
+	try {
+		await redisClient.ping();
+		console.log("✅ Redis 快取連接成功");
+	} catch (error) {
+		console.error("❌ Redis 快取連接失敗:", error);
+	}
 });

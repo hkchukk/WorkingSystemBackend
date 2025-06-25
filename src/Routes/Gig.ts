@@ -6,13 +6,14 @@ import {
 } from "../Middleware/guards.ts";
 import type IRouter from "../Interfaces/IRouter.ts";
 import dbClient from "../Client/DrizzleClient.ts";
-import { eq, and, desc } from "drizzle-orm";
+import { eq, and, desc, sql } from "drizzle-orm";
 import { gigs, gigApplications } from "../Schema/DatabaseSchema.ts";
 import validate from "@nhttp/zod";
 import { createGigSchema, updateGigSchema } from "../Middleware/validator.ts";
 import { uploadEnvironmentPhotos } from "../Middleware/uploadFile.ts";
 import { S3Client } from "bun";
 import moment from "moment";
+import { PresignedUrlCache } from "../Client/RedisClient.ts";
 
 const router = new Router();
 
@@ -127,19 +128,53 @@ const cleanupTempFiles = async (uploadedFiles: any[]) => {
 	).catch((err) => console.error("批次清理檔案時出錯:", err));
 };
 
-// 處理環境照片數據格式的輔助函數
-const formatEnvironmentPhotos = (environmentPhotos: any) => {
+// 處理環境照片數據格式的輔助函數（帶 Redis 快取）
+const formatEnvironmentPhotos = async (environmentPhotos: any) => {
 	if (!environmentPhotos) return null;
 
 	if (Array.isArray(environmentPhotos)) {
 		// 確保數據庫中最多只有 3 張照片
 		const limitedPhotos = environmentPhotos.slice(0, 3);
-		return limitedPhotos.map((photo: any) => ({
-			originalName: photo.originalName,
-			type: photo.type,
-			filename: photo.filename,
-			size: photo.size,
-		}));
+		
+		// 使用 Redis 快取策略生成 presigned URLs
+		const photosWithUrls = await Promise.all(
+			limitedPhotos.map(async (photo: any) => {
+				try {
+					// 首先檢查 Redis 快取
+					let presignedUrl = await PresignedUrlCache.get(photo.filename);
+					
+					if (!presignedUrl) {
+						// 快取中沒有或即將過期，重新生成
+						presignedUrl = await client.presign(`environment-photos/${photo.filename}`, {
+							expiresIn: 3600 // 1 小時
+						});
+						
+						// 存入快取
+						await PresignedUrlCache.set(photo.filename, presignedUrl, 3600);
+					}
+					
+					return {
+						originalName: photo.originalName,
+						type: photo.type,
+						filename: photo.filename,
+						size: photo.size,
+						url: presignedUrl,
+					};
+				} catch (error) {
+					console.error(`生成 presigned URL ${photo.filename} 時出錯:`, error);
+					return {
+						originalName: photo.originalName,
+						type: photo.type,
+						filename: photo.filename,
+						size: photo.size,
+						url: null,
+						error: '圖片連結生成失敗',
+					};
+				}
+			})
+		);
+
+		return photosWithUrls;
 	}
 	return environmentPhotos;
 };
@@ -193,30 +228,64 @@ const buildGigData = (body: any, user: any, environmentPhotosInfo: any) => {
 	};
 };
 
-// 獲取環境照片
-router.get("/getFile/:filename", async ({ params, response }) => {
+// 刪除 S3 文件
+router.delete("/deleteFile/:filename", authenticated, requireEmployer, async ({ params, user, response }) => {
 	const { filename } = params;
-
-	console.log("Fetching file:", filename);
 
 	if (!filename) {
 		return response.status(400).send("Filename is required");
 	}
 
 	try {
-		const file = client.file(`environment-photos/${filename}`);
-		const arrayBuffer: ArrayBuffer = await file.arrayBuffer();
-		if (!arrayBuffer) {
-			return response.status(404).send("File not found");
-		}
-		const array = Buffer.from(arrayBuffer);
+		// 查找包含該文件的工作
+		const targetGig = await dbClient.query.gigs.findFirst({
+			where: and(
+				eq(gigs.employerId, user.employerId),
+				sql`environment_photos::text LIKE ${`%${filename}%`}`
+			),
+			columns: {
+				gigId: true,
+				environmentPhotos: true,
+			},
+		});
+		
+		const hasExactMatch = targetGig &&
+			Array.isArray(targetGig.environmentPhotos) &&
+			targetGig.environmentPhotos.some((photo: any) => photo.filename === filename);
 
-		response.setHeader("Content-Type", "image/jpeg");
-		response.setHeader("Content-Disposition", `inline; filename="${filename}"`);
-		return response.send(array);
+		// 如果找不到包含該文件的工作，返回錯誤
+		if (!targetGig || !hasExactMatch) {
+			return response.status(404).send({
+				message: `沒有找到文件 ${filename}`,
+			});
+		}
+		
+		// 更新照片陣列
+		const updatedPhotos = Array.isArray(targetGig.environmentPhotos) 
+		? targetGig.environmentPhotos.filter((photo: any) => photo.filename !== filename)
+		: [];
+		
+		// 更新資料庫
+		await dbClient
+			.update(gigs)
+			.set({
+				environmentPhotos: updatedPhotos.length > 0 ? updatedPhotos : [],
+				updatedAt: new Date(),
+			})
+			.where(eq(gigs.gigId, targetGig.gigId));
+		
+		// 刪除 S3 文件
+		await client.delete(`environment-photos/${filename}`);
+		
+		// 清除 Redis 快取
+		await PresignedUrlCache.delete(filename);
+		
+		return response.status(200).send({
+			message: `文件 ${filename} 刪除成功`,
+		});
 	} catch (error) {
-		console.error("Error fetching file:", error);
-		return response.status(500).send("Internal server error");
+		console.error(`刪除文件 ${filename} 時出錯:`, error);
+		return response.status(500).send("刪除文件失敗");
 	}
 });
 
@@ -347,7 +416,7 @@ router.get(
 
 				return response.status(200).send({
 					...gig,
-					environmentPhotos: formatEnvironmentPhotos(gig.environmentPhotos),
+					environmentPhotos: await formatEnvironmentPhotos(gig.environmentPhotos),
 				});
 			}
 
@@ -387,7 +456,7 @@ router.get(
 			// 整合回應
 			return response.status(200).send({
 				...gig,
-				environmentPhotos: formatEnvironmentPhotos(gig.environmentPhotos),
+				environmentPhotos: await formatEnvironmentPhotos(gig.environmentPhotos),
 				applications: {
 					data: paginatedApplications.map(app => ({
 						applicationId: app.applicationId,
@@ -440,7 +509,7 @@ router.put(
 				return response.status(404).send("工作不存在或無權限修改");
 			}
 
-			const existingPhotos = formatEnvironmentPhotos(existingGig.environmentPhotos) || [];
+			const existingPhotos = await formatEnvironmentPhotos(existingGig.environmentPhotos) || [];
 			const {
 				environmentPhotosInfo,
 				uploadedFiles: filesList,
@@ -684,10 +753,12 @@ router.get("/", async ({ query, response }) => {
 		const returnGigs = hasMore ? filteredGigs.slice(0, requestLimit) : filteredGigs;
 
 		// 格式化環境照片數據
-		const formattedGigs = returnGigs.map((gig) => ({
-			...gig,
-			environmentPhotos: formatEnvironmentPhotos(gig.environmentPhotos),
-		}));
+		const formattedGigs = await Promise.all(
+			returnGigs.map(async (gig) => ({
+				...gig,
+				environmentPhotos: await formatEnvironmentPhotos(gig.environmentPhotos),
+			}))
+		);
 
 		return response.status(200).send({
 			gigs: formattedGigs,

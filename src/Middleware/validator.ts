@@ -93,8 +93,20 @@ export const updateEmployerProfileSchema = z.object({
 export const createGigSchema = z.object({
   title: z.string().min(1, "工作標題不能為空").max(256, "工作標題過長"),
   description: z.any().optional(),
-  dateStart: z.coerce.date(),
-  dateEnd: z.coerce.date(),
+  dateStart: z.coerce.date().refine((date) => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    return date >= today;
+  }, {
+    message: "工作開始日期不能是過去的日期"
+  }),
+  dateEnd: z.coerce.date().refine((date) => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    return date >= today;
+  }, {
+    message: "工作結束日期不能是過去的日期"
+  }),
   timeStart: z.string().transform((val) => {
     if (/^([01]?[0-9]|2[0-3]):[0-5][0-9]$/.test(val)) {
       return val;
@@ -127,8 +139,21 @@ export const createGigSchema = z.object({
   contactPerson: z.string().min(1, "聯絡人不能為空").max(32, "聯絡人姓名過長"),
   contactPhone: z.string().regex(/^(09\d{8}|\+8869\d{8}|0\d{1,2}-?\d{6,8})$/, "聯絡電話格式不正確").optional(),
   contactEmail: z.string().email("聯絡人 Email 格式不正確").max(128, "Email 過長").optional(),
-  publishedAt: z.coerce.date(),
-  unlistedAt: z.coerce.date().optional(),
+  publishedAt: z.coerce.date().refine((date) => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    return date >= today;
+  }, {
+    message: "刊登日期不能是過去的日期"
+  }),
+  unlistedAt: z.coerce.date().optional().refine((date) => {
+    if (!date) return true; // 可選字段，沒值就通過
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    return date >= today;
+  }, {
+    message: "下架日期不能是過去的日期"
+  }),
 }).refine((data) => {
   if (data.timeStart && data.timeEnd) {
     const [startHour, startMin] = data.timeStart.split(':').map(Number);
@@ -162,8 +187,22 @@ export const createGigSchema = z.object({
 export const updateGigSchema = z.object({
   title: z.string().min(1, "工作標題不能為空").max(256, "工作標題過長").optional(),
   description: z.any().optional(),
-  dateStart: z.coerce.date().optional(),
-  dateEnd: z.coerce.date().optional(),
+  dateStart: z.coerce.date().optional().refine((date) => {
+    if (!date) return true; // 可選字段，沒值就通過
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    return date >= today;
+  }, {
+    message: "工作開始日期不能是過去的日期"
+  }),
+  dateEnd: z.coerce.date().optional().refine((date) => {
+    if (!date) return true; // 可選字段，沒值就通過
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    return date >= today;
+  }, {
+    message: "工作結束日期不能是過去的日期"
+  }),
   timeStart: z.string().transform((val) => {
     if (/^([01]?[0-9]|2[0-3]):[0-5][0-9]$/.test(val)) {
       return val;
@@ -196,9 +235,51 @@ export const updateGigSchema = z.object({
   contactPerson: z.string().min(1, "聯絡人不能為空").max(32, "聯絡人姓名過長").optional(),
   contactPhone: z.string().regex(/^(09\d{8}|\+8869\d{8}|0\d{1,2}-?\d{6,8})$/, "聯絡電話格式不正確").optional(),
   contactEmail: z.string().email("聯絡人 Email 格式不正確").max(128, "Email 過長").optional(),
-  publishedAt: z.coerce.date().optional(),
-  unlistedAt: z.coerce.date().optional(),
+  publishedAt: z.coerce.date().optional().refine((date) => {
+    if (!date) return true; // 可選字段，沒值就通過
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    return date >= today;
+  }, {
+    message: "刊登日期不能是過去的日期"
+  }),
+  unlistedAt: z.coerce.date().optional().refine((date) => {
+    if (!date) return true; // 可選字段，沒值就通過
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    return date >= today;
+  }, {
+    message: "下架日期不能是過去的日期"
+  }),
   isActive: z.coerce.boolean().optional(),
+}).refine((data) => {
+  // 日期必須成對出現
+  const hasDateStart = data.dateStart !== undefined;
+  const hasDateEnd = data.dateEnd !== undefined;
+  return hasDateStart === hasDateEnd;
+}, {
+  message: "工作開始日期和結束日期必須同時提供",
+  path: ["dateStart", "dateEnd"]
+}).refine((data) => {
+  // 時間必須成對出現
+  const hasTimeStart = data.timeStart !== undefined;
+  const hasTimeEnd = data.timeEnd !== undefined;
+  return hasTimeStart === hasTimeEnd;
+}, {
+  message: "工作開始時間和結束時間必須同時提供",
+  path: ["timeStart", "timeEnd"]
+}).refine((data) => {
+  // 只有當要更新 unlistedAt 時，才需要同時提供 publishedAt
+  const hasUnlistedAt = data.unlistedAt !== undefined;
+  const hasPublishedAt = data.publishedAt !== undefined;
+  
+  if (hasUnlistedAt) {
+    return hasPublishedAt; // 如果有 unlistedAt，必須有 publishedAt
+  }
+  return true; // 如果沒有 unlistedAt，可以單獨更新 publishedAt
+}, {
+  message: "更新下架日期時必須同時提供刊登日期",
+  path: ["publishedAt"]
 }).refine((data) => {
   if (data.timeStart && data.timeEnd) {
     const [startHour, startMin] = data.timeStart.split(':').map(Number);

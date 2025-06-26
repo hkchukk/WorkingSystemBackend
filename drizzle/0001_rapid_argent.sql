@@ -1,0 +1,1 @@
+ALTER TABLE "workers" ADD COLUMN "profile_photo" json DEFAULT '[]'::json;

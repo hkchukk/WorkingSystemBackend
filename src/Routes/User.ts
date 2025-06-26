@@ -17,6 +17,63 @@ import {
 } from "../Middleware/validator.ts";
 import { uploadDocument, uploadProfilePhoto } from "../Middleware/uploadFile.ts";
 import { file, S3Client, S3File } from "bun";
+import { PresignedUrlCache } from "../Client/RedisClient.ts";
+
+const s3Client = new S3Client({
+  region: "auto",
+  accessKeyId: process.env.R2ACCESSKEYID,
+  secretAccessKey: process.env.R2SECRETACCESSKEY,
+  endpoint: process.env.R2ENDPOINT,
+  bucket: "backend-files",
+  retry: 1,
+});
+
+const R2_BUCKET_NAME = "backend-files";
+
+async function generatePresignedUrl(filePath: string, expiresIn: number = 3600): Promise<string | null> {
+  if (!filePath) {
+    console.warn("generatePresignedUrl called with empty filePath");
+    return null;
+  }
+
+  const cacheKey = `presigned:${R2_BUCKET_NAME}:${filePath}`;
+
+  try {
+    const cachedUrl = await PresignedUrlCache.get(cacheKey);
+    if (cachedUrl) {
+      // PresignedUrlCache.get already checks for near expiry
+      console.log(`Returning cached presigned URL for ${filePath}`);
+      return cachedUrl;
+    }
+  } catch (error) {
+    console.error(`Error fetching from PresignedUrlCache for ${cacheKey}:`, error);
+    // Proceed to generate a new URL if cache fetch fails
+  }
+
+  try {
+    // documentation and updated if necessary.
+    // The exact structure of the returned value (string or object with a URL property)
+    const signedRequestResult = await (s3Client as any).presign( filePath,{
+        expires: expiresIn, 
+    });
+
+    // Adjust if 'signedRequestResult' is an object (e.g., signedRequestResult.url)
+    const finalUrl = typeof signedRequestResult === 'object' && signedRequestResult.url ? signedRequestResult.url : signedRequestResult;
+
+    if (!finalUrl) {
+        console.error(`Failed to generate presigned URL for ${filePath}. Method might be incorrect or returned null/undefined.`);
+        return null;
+    }
+    
+    await PresignedUrlCache.set(cacheKey, finalUrl, expiresIn);
+    console.log(`Successfully generated and cached presigned URL for ${filePath}`);
+    return finalUrl;
+
+  } catch (error) {
+    console.error(`Error generating presigned URL for ${filePath}:`, error);
+    return null;
+  }
+}
 
 const router = new Router();
 
@@ -156,15 +213,6 @@ router.post(
 
         const hashedPassword = await argon2hash(password, argon2Config);
 
-        const client = new S3Client({
-          region: "auto",
-          accessKeyId: process.env.R2ACCESSKEYID,
-          secretAccessKey: process.env.R2SECRETACCESSKEY,
-          endpoint: process.env.R2ENDPOINT,
-          bucket: "backend-files",
-          retry: 1,
-        });
-
         await Promise.all(
           files.map(
             async (file: { path: string; filename: string; name: string }) => {
@@ -174,7 +222,7 @@ router.post(
                   `Verification document file not found: ${file.name}`,
                 );
               }
-              await client.write(
+              await s3Client.write(
                 `documents/${identificationType}/${file.filename}`,
                 currentFile,
               );
@@ -241,15 +289,44 @@ router.get("/logout", ({ session }) => {
 
 router.get("/profile", authenticated, async ({ user, response }) => {
   if (user.role === "worker") {
-    const { password, ...remains } = user;
+    const { password, profilePhoto, ...workerData } = user;
+    let photoUrlData = null;
 
-    return remains;
+    if (profilePhoto && profilePhoto.r2Name) {
+      const url = await generatePresignedUrl(`profile-photos/workers/${profilePhoto.r2Name}`);
+      if (url) {
+        photoUrlData = {
+          url: url,
+          originalName: profilePhoto.originalName,
+          type: profilePhoto.type,
+        };
+      } else {
+         // Keep photoUrlData as null if URL generation fails
+        console.warn(`Failed to generate presigned URL for worker ${user.workerId} photo ${profilePhoto.r2Name}`);
+      }
+    }
+    return { ...workerData, profilePhoto: photoUrlData };
   }
 
   if (user.role === "employer") {
-    const { password, ...remains } = user;
+    const { password, employerPhoto, verificationDocuments, ...employerData } = user; // Exclude verificationDocuments for now
+    let photoUrlData = null;
 
-    return remains;
+    if (employerPhoto && employerPhoto.r2Name) {
+      const url = await generatePresignedUrl(`profile-photos/employers/${employerPhoto.r2Name}`);
+      if (url) {
+        photoUrlData = {
+          url: url,
+          originalName: employerPhoto.originalName,
+          type: employerPhoto.type,
+        };
+      } else {
+        // Keep photoUrlData as null if URL generation fails
+        console.warn(`Failed to generate presigned URL for employer ${user.employerId} photo ${employerPhoto.r2Name}`);
+      }
+    }
+    // Return verificationDocuments as is from the DB for this route; it's handled by another endpoint.
+    return { ...employerData, employerPhoto: photoUrlData, verificationDocuments };
   }
 
   return response.status(400).send("Invalid role");
@@ -344,18 +421,9 @@ router.put(
           r2Name: file.filename as string,
         }));
 
-        const client = new S3Client({
-          region: "auto",
-          accessKeyId: process.env.R2ACCESSKEYID,
-          secretAccessKey: process.env.R2SECRETACCESSKEY,
-          endpoint: process.env.R2ENDPOINT,
-          bucket: "backend-files",
-          retry: 1,
-        });
-
         const deleteFiles = JSON.parse(user.verificationDocuments).map(
           (file: { r2Name: string }) => 
-            client.delete(`documents/${body.identificationType}/${file.r2Name}`)
+            s3Client.delete(`documents/${body.identificationType}/${file.r2Name}`)
         );
 
         await Promise.all(deleteFiles);
@@ -366,7 +434,7 @@ router.put(
             if (!currentFile.exists()) {
               throw new Error(`Verification document file not found: ${file.name}`);
             }
-            await client.write(
+            await s3Client.write(
               `documents/${body.identificationType}/${file.filename}`,
               currentFile,
             );
@@ -408,15 +476,6 @@ router.put(
         return response.status(400).send("No file uploaded");
       }
 
-      const client = new S3Client({
-        region: "auto",
-        accessKeyId: process.env.R2ACCESSKEYID,
-        secretAccessKey: process.env.R2SECRETACCESSKEY,
-        endpoint: process.env.R2ENDPOINT,
-        bucket: "backend-files",
-        retry: 1,
-      });
-
       const filesInfo: {
           originalName: string;
           type: string;
@@ -428,11 +487,11 @@ router.put(
         }
 
       if (user.role === "worker" && headers.get("platform") === "mobile") {
-        if( user.profilePhoto.length > 0 ){ 
-          await client.delete(`profile-photos/workers/${user.profilePhoto.r2Name}`);
+        if( user.profilePhoto && user.profilePhoto.r2Name ){ 
+          await s3Client.delete(`profile-photos/workers/${user.profilePhoto.r2Name}`);
         }
 
-        await client.write(
+        await s3Client.write(
           `profile-photos/workers/${filesInfo.r2Name}`,
           Bun.file(reqFile.profilePhoto.path),
         );
@@ -448,12 +507,11 @@ router.put(
         return response.status(200).send("Profile photo updated successfully");
       
       } else if (user.role === "employer" && headers.get("platform") === "web-employer") {
-        if( user.employerPhoto.length > 0 ){ 
-          await client.delete(`profile-photos/employers/${user.employerPhoto.r2Name}`);
+        if( user.employerPhoto && user.employerPhoto.r2Name ){ 
+          await s3Client.delete(`profile-photos/employers/${user.employerPhoto.r2Name}`);
         }
 
-        await client.delete(`profile-photos/employers/${user.employerPhoto.r2Name}`);
-        await client.write(
+        await s3Client.write(
           `profile-photos/employers/${filesInfo.r2Name}`,
           Bun.file(reqFile.profilePhoto.path),
         );
@@ -477,5 +535,61 @@ router.put(
     }
   }
 );
-        
+
+router.get("/employer/verification-documents", authenticated, async ({ user, response }) => {
+  if (!user || user.role !== "employer") {
+    return response.status(403).send("Forbidden: Employer access required.");
+  }
+
+  const employer = user; // user object is the employer object from authenticated middleware
+
+  if (!employer.verificationDocuments || typeof employer.verificationDocuments !== 'string') {
+    console.log(`Employer ${employer.employerId} has no verification documents or format is incorrect.`);
+    return response.status(200).json([]); // Return empty array if no documents
+  }
+
+  try {
+    const documentsArray = JSON.parse(employer.verificationDocuments);
+    if (!Array.isArray(documentsArray)) {
+      console.error(`Error parsing verificationDocuments for employer ${employer.employerId}: Not an array.`);
+      return response.status(500).send("Error processing verification documents.");
+    }
+
+    const documentsWithUrls = await Promise.all(
+      documentsArray.map(async (doc: any) => {
+        if (doc && doc.r2Name && employer.identificationType) {
+          const filePath = `documents/${employer.identificationType}/${doc.r2Name}`;
+          const url = await generatePresignedUrl(filePath);
+          if (url) {
+            return {
+              originalName: doc.originalName,
+              type: doc.type,
+              url: url,
+            };
+          } else {
+            console.warn(`Failed to generate presigned URL for document ${doc.r2Name} of employer ${employer.employerId}`);
+            // Return the document without a URL if generation fails, or omit it
+            return {
+              originalName: doc.originalName,
+              type: doc.type,
+              url: null, // Explicitly set URL to null
+              error: "Failed to generate URL for this document.",
+            };
+          }
+        }
+        // If doc is malformed or r2Name is missing, filter it out or return with error
+        return null; 
+      })
+    );
+
+    // Filter out any null entries that resulted from malformed doc objects
+    const validDocuments = documentsWithUrls.filter(doc => doc !== null);
+
+    return response.status(200).json(validDocuments);
+  } catch (error) {
+    console.error(`Error processing verification documents for employer ${employer.employerId}:`, error);
+    return response.status(500).send("Internal server error while processing documents.");
+  }
+});
+
 export default { path: "/user", router } as IRouter;

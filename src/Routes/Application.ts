@@ -57,12 +57,13 @@ router.post(
       }
 
       // 檢查工作是否已下架（根據 unlistedAt）
-      const gigUnlistedAt = moment(gig.unlistedAt).format('YYYY-MM-DD');
-
-      if (gigUnlistedAt && gigUnlistedAt < currentDate) {
-        return response.status(400).send({
-          message: "此工作已下架，無法申請",
-        });
+      if (gig.unlistedAt) {
+        const gigUnlistedAt = moment(gig.unlistedAt);
+        if (currentDate.isAfter(gigUnlistedAt)) {
+          return response.status(400).send({
+            message: "此工作已下架，無法申請",
+          });
+        }
       }
 
       // 檢查是否已經申請過這個工作（只有 pending 和 approved 狀態算作已申請）

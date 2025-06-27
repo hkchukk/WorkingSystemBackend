@@ -1,15 +1,15 @@
 import { Router } from "@nhttp/nhttp";
 import { authenticated } from "../Middleware/middleware.ts";
-import { 
-  requireWorker, 
-  requireEmployer, 
+import {
+  requireWorker,
+  requireEmployer,
   requireApprovedEmployer
 } from "../Middleware/guards.ts";
 import type IRouter from "../Interfaces/IRouter.ts";
 import dbClient from "../Client/DrizzleClient.ts";
-import { eq, and, desc, or, lte, sql } from "drizzle-orm";
-import { 
-  gigs, 
+import { eq, and, desc, or, lte, sql, gte } from "drizzle-orm";
+import {
+  gigs,
   gigApplications
 } from "../Schema/DatabaseSchema.ts";
 import validate from "@nhttp/zod";
@@ -25,19 +25,19 @@ const router = new Router();
  * POST /application/apply/:gigId
  */
 router.post(
-  "/apply/:gigId", 
+  "/apply/:gigId",
   authenticated,
   requireWorker,
   async ({ user, params, response }) => {
     try {
       const { gigId } = params;
-      const currentDate = moment().format('YYYY-MM-DD');
+      const currentDate = moment().set({ hour: 0, minute: 0, second: 0, millisecond: 0 });
       const gig = await dbClient.query.gigs.findFirst({
         where: and(
           eq(gigs.gigId, gigId),
           eq(gigs.isActive, true),
-          lte(gigs.publishedAt, currentDate),
-          sql`(${gigs.unlistedAt} IS NULL OR ${gigs.unlistedAt} >= ${currentDate})`
+          lte(gigs.publishedAt, currentDate.format('YYYY-MM-DD')),
+          or(eq(gigs.unlistedAt, null), gte(gigs.unlistedAt, currentDate.format('YYYY-MM-DD')))
         )
       });
 
@@ -48,9 +48,9 @@ router.post(
       }
 
       // 檢查工作是否已過期（根據 dateEnd）
-      const gigEndDate = moment(gig.dateEnd).format('YYYY-MM-DD');
+      const gigEndDate = moment(gig.dateEnd);
 
-      if (gigEndDate < currentDate) {
+      if (currentDate.isAfter(gigEndDate)) {
         return response.status(400).send({
           message: "此工作已過期，無法申請",
         });
@@ -177,7 +177,7 @@ router.get("/my-applications", authenticated, requireWorker, async ({ user, quer
 
     // 建立查詢條件
     const whereConditions = [eq(gigApplications.workerId, user.workerId)];
-    
+
     if (status && ["pending", "approved", "rejected", "cancelled"].includes(status)) {
       whereConditions.push(eq(gigApplications.status, status));
     }
@@ -251,7 +251,7 @@ router.get("/gig/:gigId", authenticated, requireEmployer, async ({ user, params,
     const gig = await dbClient.query.gigs.findFirst({
       where: and(eq(gigs.gigId, gigId), eq(gigs.employerId, user.employerId)),
     });
-    
+
     if (!gig) {
       return response.status(404).send({
         message: "工作不存在或無權限查看",
@@ -259,7 +259,7 @@ router.get("/gig/:gigId", authenticated, requireEmployer, async ({ user, params,
     }
 
     const whereConditions = [eq(gigApplications.gigId, gigId)];
-    
+
     // 單一狀態過濾：?status=pending 或不傳參數顯示全部
     if (status && ["pending", "approved", "rejected", "cancelled"].includes(status)) {
       whereConditions.push(eq(gigApplications.status, status));
@@ -413,9 +413,9 @@ router.get("/gig/all", authenticated, requireEmployer, async ({ user, query, res
       where: eq(gigs.employerId, user.employerId),
       columns: { gigId: true },
     });
-    
+
     const userGigIds = userGigs.map(gig => gig.gigId);
-    
+
     if (userGigIds.length === 0) {
       // 如果沒有工作，直接返回空結果
       return response.status(200).send({
@@ -432,7 +432,7 @@ router.get("/gig/all", authenticated, requireEmployer, async ({ user, query, res
     if (status && ["pending", "approved", "rejected", "cancelled"].includes(status)) {
       applicationStatusConditions = eq(gigApplications.status, status);
     }
-    
+
     // 建立申請查詢條件
     if (userGigIds.length === 1) {
       applicationWhereConditions.push(eq(gigApplications.gigId, userGigIds[0]));
@@ -440,7 +440,7 @@ router.get("/gig/all", authenticated, requireEmployer, async ({ user, query, res
       const gigIdConditions = userGigIds.map(id => eq(gigApplications.gigId, id));
       applicationWhereConditions.push(or(...gigIdConditions));
     }
-    
+
     // 添加狀態過濾條件
     if (applicationStatusConditions) {
       applicationWhereConditions.push(applicationStatusConditions);
@@ -475,14 +475,14 @@ router.get("/gig/all", authenticated, requireEmployer, async ({ user, query, res
           applications: []
         };
       }
-      
+
       acc[gigId].applicationCount++;
       acc[gigId].applications.push({
         applicationId: app.applicationId,
         status: app.status,
         appliedAt: app.createdAt,
       });
-      
+
       return acc;
     }, {});
 

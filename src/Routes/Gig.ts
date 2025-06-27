@@ -6,7 +6,7 @@ import {
 } from "../Middleware/guards.ts";
 import type IRouter from "../Interfaces/IRouter.ts";
 import dbClient from "../Client/DrizzleClient.ts";
-import { eq, and, desc, sql } from "drizzle-orm";
+import { eq, and, desc, sql, gte, lte } from "drizzle-orm";
 import { gigs, gigApplications } from "../Schema/DatabaseSchema.ts";
 import validate from "@nhttp/zod";
 import { createGigSchema, updateGigSchema } from "../Middleware/validator.ts";
@@ -519,50 +519,6 @@ router.put(
 			} = await handlePhotoUpload(reqFile, existingPhotos);
 			uploadedFiles = filesList;
 
-			// 構建更新數據
-			// const updateData: any = {};
-
-			// if (body.title) updateData.title = body.title;
-			// if (body.description !== undefined)
-			//   updateData.description = body.description
-			//     ? JSON.stringify(body.description)
-			//     : null;
-			// if (body.dateStart)
-			//   updateData.dateStart = new Date(body.dateStart)
-			//     .toISOString()
-			//     .split("T")[0];
-			// if (body.dateEnd)
-			//   updateData.dateEnd = new Date(body.dateEnd).toISOString().split("T")[0];
-			// if (body.timeStart) updateData.timeStart = body.timeStart;
-			// if (body.timeEnd) updateData.timeEnd = body.timeEnd;
-			// if (body.requirements !== undefined)
-			//   updateData.requirements = body.requirements
-			//     ? JSON.stringify(body.requirements)
-			//     : null;
-			// if (body.hourlyRate) updateData.hourlyRate = body.hourlyRate;
-			// if (body.city) updateData.city = body.city;
-			// if (body.district) updateData.district = body.district;
-			// if (body.address) updateData.address = body.address;
-			// if (body.contactPerson) updateData.contactPerson = body.contactPerson;
-			// if (body.contactPhone !== undefined)
-			//   updateData.contactPhone = body.contactPhone;
-			// if (body.contactEmail !== undefined)
-			//   updateData.contactEmail = body.contactEmail;
-			// if (addedCount > 0)
-			//   updateData.environmentPhotos = JSON.stringify(environmentPhotosInfo);
-			// if (body.publishedAt)
-			//   updateData.publishedAt = new Date(body.publishedAt)
-			//     .toISOString()
-			//     .split("T")[0];
-			// if (body.unlistedAt)
-			//   updateData.unlistedAt = new Date(body.unlistedAt)
-			//     .toISOString()
-			//     .split("T")[0];
-			// if (body.isActive !== undefined) updateData.isActive = body.isActive;
-
-			// updateData.updatedAt = new Date();
-			// await dbClient.update(gigs).set(updateData).where(eq(gigs.gigId, gigId));
-
 			await dbClient
 				.update(gigs)
 				.set({
@@ -700,20 +656,142 @@ router.delete(
 	},
 );
 
-// 獲取所有可用工作（給打工者查看）
-router.get("/", async ({ query, response }) => {
+// 獲取所有可用工作
+router.get("/public/", async ({ query, response }) => {
 	try {
-		const { limit = 10, offset = 0, city, district, minRate, maxRate } = query;
+		const { 
+			limit = 10, 
+			offset = 0, 
+			city, 
+			district, 
+			minRate, 
+			maxRate,
+			dateStart,
+			dateEnd 
+		} = query;
+		
+		// 驗證 city 和 district 必須成對
+		if (district && !city) {
+			return response.status(400).send({
+				error: "提供區域時必須同時提供城市"
+			});
+		}
+		
 		const requestLimit = Number.parseInt(limit);
 		const requestOffset = Number.parseInt(offset);
 		const minRateFilter = minRate ? Number.parseInt(minRate) : null;
 		const maxRateFilter = maxRate ? Number.parseInt(maxRate) : null;
 
+		// 處理日期邏輯
+		const today = moment().format("YYYY-MM-DD");
+		const searchDateStart = dateStart || today;
+
+		// 建立查詢條件
+		const whereConditions = [
+			eq(gigs.isActive, true),
+			lte(gigs.publishedAt, today)
+		];
+		
+		// 檢查 unlistedAt（如果有設定下架日期，則必須還未到下架日期）
+		whereConditions.push(
+			sql`(${gigs.unlistedAt} IS NULL OR ${gigs.unlistedAt} >= ${today})`
+		);
+
+		// 添加日期查詢條件
+		whereConditions.push(gte(gigs.dateStart, searchDateStart));
+
+		if (dateEnd) {
+			whereConditions.push(lte(gigs.dateEnd, dateEnd));
+		}
+
+		// 添加城市篩選
+		if (city) {
+			whereConditions.push(eq(gigs.city, city));
+		}
+
+		// 添加區域篩選
+		if (district) {
+			whereConditions.push(eq(gigs.district, district));
+		}
+
+		// 添加時薪篩選
+		if (minRateFilter) {
+			whereConditions.push(gte(gigs.hourlyRate, minRateFilter));
+		}
+
+		if (maxRateFilter) {
+			whereConditions.push(lte(gigs.hourlyRate, maxRateFilter));
+		}
+
 		const availableGigs = await dbClient.query.gigs.findMany({
-			where: eq(gigs.isActive, true),
+			where: and(...whereConditions),
 			orderBy: [desc(gigs.createdAt)],
 			limit: requestLimit + 1, // 多查一筆來確認是否有更多資料
 			offset: requestOffset,
+			columns: {
+				gigId: true,
+				title: true,
+				hourlyRate: true,
+				city: true,
+				district: true,
+				updatedAt: true,
+			},
+		});
+
+		// 檢查是否有更多資料
+		const hasMore = availableGigs.length > requestLimit;
+
+		if (hasMore) {
+			availableGigs.pop(); // 移除多出來的那一筆
+		}
+
+		return response.status(200).send({
+			gigs: availableGigs,
+			pagination: {
+				limit: requestLimit,
+				offset: requestOffset,
+				hasMore,
+				returned: availableGigs.length,
+			},
+			filters: {
+				city,
+				district,
+				minRate: minRateFilter,
+				maxRate: maxRateFilter,
+				dateStart: searchDateStart,
+				dateEnd,
+			},
+		});
+	} catch (error) {
+		console.error("獲取工作列表時出錯:", error);
+		return response.status(500).send("伺服器內部錯誤");
+	}
+});
+
+// 獲取單一可用工作（詳細版）
+router.get("/public/:gigId/", async ({ params, response }) => {
+	try {
+		const { gigId } = params;
+
+		if (!gigId) {
+			return response.status(400).send({ error: "Gig ID is required" });
+		}
+
+		const today = moment().format("YYYY-MM-DD");
+
+		const whereConditions = [
+			eq(gigs.gigId, gigId),
+			eq(gigs.isActive, true),
+			lte(gigs.publishedAt, today),
+			sql`(${gigs.unlistedAt} IS NULL OR ${gigs.unlistedAt} >= ${today})`,
+		];
+
+		const gig = await dbClient.query.gigs.findFirst({
+			where: and(...whereConditions),
+			columns: {
+				isActive: false,
+				createdAt: false,
+			},
 			with: {
 				employer: {
 					columns: {
@@ -722,63 +800,129 @@ router.get("/", async ({ query, response }) => {
 						branchName: true,
 						industryType: true,
 						address: true,
+						employerPhoto: true,
 					},
 				},
 			},
 		});
 
-		// 進一步過濾（Drizzle ORM 某些複雜查詢可能需要在應用層處理）
-		let filteredGigs = availableGigs;
-
-		if (city) {
-			filteredGigs = filteredGigs.filter((gig) => gig.city.includes(city));
+		if (!gig) {
+			return response.status(404).send({ message: "工作不存在或目前無法查看" });
 		}
 
-		if (district) {
-			filteredGigs = filteredGigs.filter((gig) =>
-				gig.district.includes(district),
-			);
-		}
+		const formattedGig = {
+			...gig,
+			environmentPhotos: await formatEnvironmentPhotos(gig.environmentPhotos),
+		};
 
-		if (minRateFilter) {
-			filteredGigs = filteredGigs.filter((gig) => gig.hourlyRate >= minRateFilter);
-		}
+		return response.status(200).send(formattedGig);
 
-		if (maxRateFilter) {
-			filteredGigs = filteredGigs.filter((gig) => gig.hourlyRate <= maxRateFilter);
-		}
-
-		// 檢查是否有更多資料（考慮過濾後的結果）
-		const hasMore = filteredGigs.length > requestLimit;
-		const returnGigs = hasMore ? filteredGigs.slice(0, requestLimit) : filteredGigs;
-
-		// 格式化環境照片數據
-		const formattedGigs = await Promise.all(
-			returnGigs.map(async (gig) => ({
-				...gig,
-				environmentPhotos: await formatEnvironmentPhotos(gig.environmentPhotos),
-			}))
-		);
-
-		return response.status(200).send({
-			gigs: formattedGigs,
-			pagination: {
-				limit: requestLimit,
-				offset: requestOffset,
-				hasMore,
-				returned: returnGigs.length,
-			},
-			filters: {
-				city,
-				district,
-				minRate: minRateFilter,
-				maxRate: maxRateFilter,
-			},
-		});
 	} catch (error) {
-		console.error("獲取工作列表時出錯:", error);
+		console.error(`獲取詳細工作 ${params.gigId} 時出錯:`, error);
 		return response.status(500).send("伺服器內部錯誤");
 	}
 });
+
+// Employer 行事曆 - 查看已排定的工作
+router.get("/employer/calendar", authenticated, requireEmployer, requireApprovedEmployer,async ({ user, query, response }) => {
+	try {
+		const { 
+			year, 
+			month, 
+			dateStart, 
+			dateEnd 
+		} = query;
+		
+		const currentDate = moment().format('YYYY-MM-DD');
+
+		const whereConditions = [
+			eq(gigs.employerId, user.employerId),
+			eq(gigs.isActive, true),
+			lte(gigs.publishedAt, currentDate)
+		];
+		
+		// 檢查 unlistedAt（如果有設定下架日期，則必須還未到下架日期）
+		whereConditions.push(
+			sql`(${gigs.unlistedAt} IS NULL OR ${gigs.unlistedAt} >= ${currentDate})`
+		);
+		
+		// 處理日期查詢邏輯
+		if (year && month) {
+			// 月份查詢模式
+			const yearNum = Number.parseInt(year);
+			const monthNum = Number.parseInt(month);
+			
+			// 驗證年月範圍
+			if (yearNum < 2020 || yearNum > 2050 || monthNum < 1 || monthNum > 12) {
+				return response.status(400).send({
+					error: "年份必須在 2020-2050 之間，月份必須在 1-12 之間"
+				});
+			}
+			
+			// 建立該月份的開始和結束日期
+			const startDate = moment(`${yearNum}-${monthNum.toString().padStart(2, '0')}-01`).format('YYYY-MM-DD');
+			const endDate = moment(startDate).endOf('month').format('YYYY-MM-DD');
+			
+			// 查詢工作期間與該月有重疊的工作
+			whereConditions.push(
+				and(
+					lte(gigs.dateStart, endDate),
+					gte(gigs.dateEnd, startDate)
+				)
+			);
+		} else if (dateStart || dateEnd) {
+			// 自訂日期範圍模式
+			if (dateStart) {
+				whereConditions.push(gte(gigs.dateStart, dateStart));
+			}
+			if (dateEnd) {
+				whereConditions.push(lte(gigs.dateEnd, dateEnd));
+			}
+		} else {
+			// 預設顯示當月
+			const currentMoment = moment();
+			const startDate = currentMoment.clone().startOf('month').format('YYYY-MM-DD');
+			const endDate = currentMoment.clone().endOf('month').format('YYYY-MM-DD');
+			
+			whereConditions.push(
+				and(
+					lte(gigs.dateStart, endDate),
+					gte(gigs.dateEnd, startDate)
+				)
+			);
+		}
+		
+		const calendarGigs = await dbClient.query.gigs.findMany({
+			where: and(...whereConditions),
+			orderBy: [gigs.dateStart, gigs.timeStart],
+			columns: {
+				gigId: true,
+				title: true,
+				dateStart: true,
+				dateEnd: true,
+				timeStart: true,
+				timeEnd: true,
+			},
+		});
+		
+		return response.status(200).send({
+			gigs: calendarGigs,
+			queryInfo: {
+				year: year || null,
+				month: month || null,
+				dateStart: dateStart || null,
+				dateEnd: dateEnd || null,
+				isMonthQuery: !!(year && month),
+				isRangeQuery: !!(dateStart || dateEnd),
+				isDefaultMonth: !(year && month) && !(dateStart || dateEnd)
+			}
+		});
+		
+	} catch (error) {
+		console.error("獲取 Employer 行事曆時出錯:", error);
+		return response.status(500).send("伺服器內部錯誤");
+	}
+});
+
 
 export default { path: "/gig", router } as IRouter;

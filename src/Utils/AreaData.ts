@@ -12,6 +12,6 @@ export function isValidCity(city: string): boolean {
 	return city in areaData;
 }
 
-export function isValidDistrict(city: string, district: string): boolean | undefined {
+export function isValidDistrict(city: string, district: string): boolean {
 	return areaData[city]?.includes(district) ?? false;
 }

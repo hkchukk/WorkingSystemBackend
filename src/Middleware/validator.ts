@@ -1,5 +1,6 @@
 import { z } from "@nhttp/zod";
 import { isValidCity, isValidDistrict } from "../Utils/AreaData";
+import moment from "moment";
 
 /* user route */
 export const workerSignupSchema = z.object({
@@ -156,11 +157,9 @@ export const createGigSchema = z.object({
   }),
 }).refine((data) => {
   if (data.timeStart && data.timeEnd) {
-    const [startHour, startMin] = data.timeStart.split(':').map(Number);
-    const [endHour, endMin] = data.timeEnd.split(':').map(Number);
-    const startMinutes = startHour * 60 + startMin;
-    const endMinutes = endHour * 60 + endMin;
-    return endMinutes > startMinutes;
+    const startTime = moment(data.timeStart, "HH:mm");
+    const endTime = moment(data.timeEnd, "HH:mm");
+    return endTime.isAfter(startTime);
   }
   return true;
 }, {
@@ -265,88 +264,86 @@ export const updateGigSchema = z.object({
   }),
   isActive: z.coerce.boolean().optional(),
 })
-// 1. 成對驗證
-.refine((data) => {
-  // 日期必須成對出現
-  const hasDateStart = data.dateStart !== undefined;
-  const hasDateEnd = data.dateEnd !== undefined;
-  return hasDateStart === hasDateEnd;
-}, {
-  message: "工作開始日期和結束日期必須同時提供",
-  path: ["dateStart", "dateEnd"]
-}).refine((data) => {
-  // 時間必須成對出現
-  const hasTimeStart = data.timeStart !== undefined;
-  const hasTimeEnd = data.timeEnd !== undefined;
-  return hasTimeStart === hasTimeEnd;
-}, {
-  message: "工作開始時間和結束時間必須同時提供",
-  path: ["timeStart", "timeEnd"]
-}).refine((data) => {
-  // 城市和區域必須成對出現
-  const hasCity = data.city !== undefined;
-  const hasDistrict = data.district !== undefined;
-  return hasCity === hasDistrict;
-}, {
-  message: "城市和區域必須同時提供",
-  path: ["city", "district"]
-})
-// 2. 有效性驗證
-.refine((data) => {
-  // 如果提供了 city，則必須是有效的
-  if (data.city) {
-    return isValidCity(data.city);
-  }
-  return true;
-}, {
-  message: "請選擇有效的城市",
-  path: ["city"]
-}).refine((data) => {
-  // 如果提供了 city 和 district，則組合必須是有效的
-  if (data.city && data.district) {
-    return isValidDistrict(data.city, data.district);
-  }
-  return true;
-}, {
-  message: "所選區域不屬於指定城市",
-  path: ["district"]
-})
-// 3. 邏輯驗證
-.refine((data) => {
-  // 時間關係
-  if (data.timeStart && data.timeEnd) {
-    const [startHour, startMin] = data.timeStart.split(':').map(Number);
-    const [endHour, endMin] = data.timeEnd.split(':').map(Number);
-    const startMinutes = startHour * 60 + startMin;
-    const endMinutes = endHour * 60 + endMin;
-    return endMinutes > startMinutes;
-  }
-  return true;
-}, {
-  message: "結束時間必須晚於開始時間",
-  path: ["timeEnd"]
-}).refine((data) => {
-  // 日期關係
-  if (data.dateStart && data.dateEnd) {
-    return data.dateEnd >= data.dateStart;
-  }
-  return true;
-}, {
-  message: "結束日期必須晚於或等於開始日期",
-  path: ["dateEnd"]
-}).refine((data) => {
-  // 刊登下架日期關係
-  const publishedAt = data.publishedAt;
-  const unlistedAt = data.unlistedAt;
+  // 1. 成對驗證
+  .refine((data) => {
+    // 日期必須成對出現
+    const hasDateStart = data.dateStart !== undefined;
+    const hasDateEnd = data.dateEnd !== undefined;
+    return hasDateStart === hasDateEnd;
+  }, {
+    message: "工作開始日期和結束日期必須同時提供",
+    path: ["dateStart", "dateEnd"]
+  }).refine((data) => {
+    // 時間必須成對出現
+    const hasTimeStart = data.timeStart !== undefined;
+    const hasTimeEnd = data.timeEnd !== undefined;
+    return hasTimeStart === hasTimeEnd;
+  }, {
+    message: "工作開始時間和結束時間必須同時提供",
+    path: ["timeStart", "timeEnd"]
+  }).refine((data) => {
+    // 城市和區域必須成對出現
+    const hasCity = data.city !== undefined;
+    const hasDistrict = data.district !== undefined;
+    return hasCity === hasDistrict;
+  }, {
+    message: "城市和區域必須同時提供",
+    path: ["city", "district"]
+  })
+  // 2. 有效性驗證
+  .refine((data) => {
+    // 如果提供了 city，則必須是有效的
+    if (data.city) {
+      return isValidCity(data.city);
+    }
+    return true;
+  }, {
+    message: "請選擇有效的城市",
+    path: ["city"]
+  }).refine((data) => {
+    // 如果提供了 city 和 district，則組合必須是有效的
+    if (data.city && data.district) {
+      return isValidDistrict(data.city, data.district);
+    }
+    return true;
+  }, {
+    message: "所選區域不屬於指定城市",
+    path: ["district"]
+  })
+  // 3. 邏輯驗證
+  .refine((data) => {
+    // 時間關係
+    if (data.timeStart && data.timeEnd) {
+      const startTime = moment(data.timeStart, "HH:mm");
+      const endTime = moment(data.timeEnd, "HH:mm");
+      return endTime.isAfter(startTime);
+    }
+    return true;
+  }, {
+    message: "結束時間必須晚於開始時間",
+    path: ["timeEnd"]
+  }).refine((data) => {
+    // 日期關係
+    if (data.dateStart && data.dateEnd) {
+      return data.dateEnd >= data.dateStart;
+    }
+    return true;
+  }, {
+    message: "結束日期必須晚於或等於開始日期",
+    path: ["dateEnd"]
+  }).refine((data) => {
+    // 刊登下架日期關係
+    const publishedAt = data.publishedAt;
+    const unlistedAt = data.unlistedAt;
 
-  if (publishedAt && unlistedAt) {
-    return unlistedAt >= publishedAt;
-  }
-  return true;
-}, {
-  message: "下架日期必須晚於刊登日期",
-  path: ["unlistedAt"]
-});
+    if (publishedAt && unlistedAt) {
+      return unlistedAt >= publishedAt;
+    }
+    return true;
+  }, {
+    message: "下架日期必須晚於刊登日期",
+    path: ["unlistedAt"]
+  });
 
 // 申請審核驗證 Schema
 export const reviewApplicationSchema = z.object({
@@ -357,7 +354,7 @@ export const reviewApplicationSchema = z.object({
 
 export const adminRegister = z.object({
   email: z.string().email("Invalid email format"),
-  password:z.string().min(8, "Password must be at least 8 characters")
+  password: z.string().min(8, "Password must be at least 8 characters")
     .regex(/[A-Z]/, "Must contain at least one uppercase letter")
     .regex(/[a-z]/, "Must contain at least one lowercase letter")
     .regex(/[0-9]/, "Must contain at least one number")

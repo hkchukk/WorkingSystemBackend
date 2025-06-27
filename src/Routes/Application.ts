@@ -14,6 +14,7 @@ import {
 } from "../Schema/DatabaseSchema.ts";
 import validate from "@nhttp/zod";
 import { reviewApplicationSchema } from "../Middleware/validator.ts";
+import moment from "moment";
 
 const router = new Router();
 
@@ -30,9 +31,7 @@ router.post(
   async ({ user, params, response }) => {
     try {
       const { gigId } = params;
-
-      // 檢查工作是否存在且為啟用狀態
-      const currentDate = new Date().toISOString().split('T')[0]; // YYYY-MM-DD 格式
+      const currentDate = moment().format('YYYY-MM-DD');
       const gig = await dbClient.query.gigs.findFirst({
         where: and(
           eq(gigs.gigId, gigId),
@@ -49,15 +48,18 @@ router.post(
       }
 
       // 檢查工作是否已過期（根據 dateEnd）
-      const gigEndDate = new Date(gig.dateEnd);
-      if (gigEndDate < new Date()) {
+      const gigEndDate = moment(gig.dateEnd).format('YYYY-MM-DD');
+
+      if (gigEndDate < currentDate) {
         return response.status(400).send({
           message: "此工作已過期，無法申請",
         });
       }
 
       // 檢查工作是否已下架（根據 unlistedAt）
-      if (gig.unlistedAt && new Date(gig.unlistedAt) < new Date()) {
+      const gigUnlistedAt = moment(gig.unlistedAt).format('YYYY-MM-DD');
+
+      if (gigUnlistedAt && gigUnlistedAt < currentDate) {
         return response.status(400).send({
           message: "此工作已下架，無法申請",
         });
@@ -68,7 +70,6 @@ router.post(
         where: and(
           eq(gigApplications.workerId, user.workerId),
           eq(gigApplications.gigId, gigId),
-          // 只檢查 pending 和 approved 狀態，cancelled 和 rejected 可以重新申請
           or(eq(gigApplications.status, "pending"), eq(gigApplications.status, "approved"))
         ),
       });

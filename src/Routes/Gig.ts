@@ -689,39 +689,16 @@ router.get("/public/", async ({ query, response }) => {
 		// 建立查詢條件
 		const whereConditions = [
 			eq(gigs.isActive, true),
-			lte(gigs.publishedAt, today)
+			lte(gigs.publishedAt, today),
+			sql`(${gigs.unlistedAt} IS NULL OR ${gigs.unlistedAt} >= ${today})`,
+			gte(gigs.dateStart, searchDateStart),
 		];
 		
-		// 檢查 unlistedAt（如果有設定下架日期，則必須還未到下架日期）
-		whereConditions.push(
-			sql`(${gigs.unlistedAt} IS NULL OR ${gigs.unlistedAt} >= ${today})`
-		);
-
-		// 添加日期查詢條件
-		whereConditions.push(gte(gigs.dateStart, searchDateStart));
-
-		if (dateEnd) {
-			whereConditions.push(lte(gigs.dateEnd, dateEnd));
-		}
-
-		// 添加城市篩選
-		if (city) {
-			whereConditions.push(eq(gigs.city, city));
-		}
-
-		// 添加區域篩選
-		if (district) {
-			whereConditions.push(eq(gigs.district, district));
-		}
-
-		// 添加時薪篩選
-		if (minRateFilter) {
-			whereConditions.push(gte(gigs.hourlyRate, minRateFilter));
-		}
-
-		if (maxRateFilter) {
-			whereConditions.push(lte(gigs.hourlyRate, maxRateFilter));
-		}
+		dateEnd ? whereConditions.push(lte(gigs.dateEnd, dateEnd)) : null;
+		city ? whereConditions.push(eq(gigs.city, city)) : null;
+		district ? whereConditions.push(eq(gigs.district, district)) : null;
+		minRateFilter ? whereConditions.push(gte(gigs.hourlyRate, minRateFilter)) : null;
+		maxRateFilter ? whereConditions.push(lte(gigs.hourlyRate, maxRateFilter)) : null;
 
 		const availableGigs = await dbClient.query.gigs.findMany({
 			where: and(...whereConditions),
@@ -738,12 +715,8 @@ router.get("/public/", async ({ query, response }) => {
 			},
 		});
 
-		// 檢查是否有更多資料
 		const hasMore = availableGigs.length > requestLimit;
-
-		if (hasMore) {
-			availableGigs.pop(); // 移除多出來的那一筆
-		}
+		hasMore ? availableGigs.pop() : null;
 
 		return response.status(200).send({
 			gigs: availableGigs,
@@ -824,7 +797,7 @@ router.get("/public/:gigId/", async ({ params, response }) => {
 });
 
 // Employer 行事曆 - 查看已排定的工作
-router.get("/employer/calendar", authenticated, requireEmployer, requireApprovedEmployer,async ({ user, query, response }) => {
+router.get("/employer/calendar", authenticated, requireEmployer, requireApprovedEmployer, async ({ user, query, response }) => {
 	try {
 		const { 
 			year, 
@@ -834,17 +807,12 @@ router.get("/employer/calendar", authenticated, requireEmployer, requireApproved
 		} = query;
 		
 		const currentDate = moment().format('YYYY-MM-DD');
-
 		const whereConditions = [
 			eq(gigs.employerId, user.employerId),
 			eq(gigs.isActive, true),
-			lte(gigs.publishedAt, currentDate)
-		];
-		
-		// 檢查 unlistedAt（如果有設定下架日期，則必須還未到下架日期）
-		whereConditions.push(
+			lte(gigs.publishedAt, currentDate),
 			sql`(${gigs.unlistedAt} IS NULL OR ${gigs.unlistedAt} >= ${currentDate})`
-		);
+		];
 		
 		// 處理日期查詢邏輯
 		if (year && month) {
@@ -872,17 +840,12 @@ router.get("/employer/calendar", authenticated, requireEmployer, requireApproved
 			);
 		} else if (dateStart || dateEnd) {
 			// 自訂日期範圍模式
-			if (dateStart) {
-				whereConditions.push(gte(gigs.dateStart, dateStart));
-			}
-			if (dateEnd) {
-				whereConditions.push(lte(gigs.dateEnd, dateEnd));
-			}
+			dateStart ? whereConditions.push(gte(gigs.dateStart, dateStart)) : null;
+			dateEnd ? whereConditions.push(lte(gigs.dateEnd, dateEnd)) : null;
 		} else {
 			// 預設顯示當月
-			const currentMoment = moment();
-			const startDate = currentMoment.clone().startOf('month').format('YYYY-MM-DD');
-			const endDate = currentMoment.clone().endOf('month').format('YYYY-MM-DD');
+			const startDate = moment(currentDate).startOf('month').format('YYYY-MM-DD');
+			const endDate = moment(currentDate).endOf('month').format('YYYY-MM-DD');
 			
 			whereConditions.push(
 				and(

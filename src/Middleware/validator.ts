@@ -1,5 +1,5 @@
 import { z } from "@nhttp/zod";
-
+import { isValidCity, isValidDistrict } from "../Utils/AreaData";
 
 /* user route */
 export const workerSignupSchema = z.object({
@@ -182,6 +182,18 @@ export const createGigSchema = z.object({
 }, {
   message: "下架日期必須晚於刊登日期",
   path: ["unlistedAt"]
+}).refine((data) => {
+  // 驗證城市是否有效
+  return isValidCity(data.city);
+}, {
+  message: "請選擇有效的城市",
+  path: ["city"]
+}).refine((data) => {
+  // 驗證城市和區域的組合是否有效
+  return isValidDistrict(data.city, data.district);
+}, {
+  message: "所選區域不屬於指定城市",
+  path: ["district"]
 });
 
 export const updateGigSchema = z.object({
@@ -252,7 +264,9 @@ export const updateGigSchema = z.object({
     message: "下架日期不能是過去的日期"
   }),
   isActive: z.coerce.boolean().optional(),
-}).refine((data) => {
+})
+// 1. 成對驗證
+.refine((data) => {
   // 日期必須成對出現
   const hasDateStart = data.dateStart !== undefined;
   const hasDateEnd = data.dateEnd !== undefined;
@@ -269,18 +283,37 @@ export const updateGigSchema = z.object({
   message: "工作開始時間和結束時間必須同時提供",
   path: ["timeStart", "timeEnd"]
 }).refine((data) => {
-  // 只有當要更新 unlistedAt 時，才需要同時提供 publishedAt
-  const hasUnlistedAt = data.unlistedAt !== undefined;
-  const hasPublishedAt = data.publishedAt !== undefined;
-  
-  if (hasUnlistedAt) {
-    return hasPublishedAt; // 如果有 unlistedAt，必須有 publishedAt
-  }
-  return true; // 如果沒有 unlistedAt，可以單獨更新 publishedAt
+  // 城市和區域必須成對出現
+  const hasCity = data.city !== undefined;
+  const hasDistrict = data.district !== undefined;
+  return hasCity === hasDistrict;
 }, {
-  message: "更新下架日期時必須同時提供刊登日期",
-  path: ["publishedAt"]
+  message: "城市和區域必須同時提供",
+  path: ["city", "district"]
+})
+// 2. 有效性驗證
+.refine((data) => {
+  // 如果提供了 city，則必須是有效的
+  if (data.city) {
+    return isValidCity(data.city);
+  }
+  return true;
+}, {
+  message: "請選擇有效的城市",
+  path: ["city"]
 }).refine((data) => {
+  // 如果提供了 city 和 district，則組合必須是有效的
+  if (data.city && data.district) {
+    return isValidDistrict(data.city, data.district);
+  }
+  return true;
+}, {
+  message: "所選區域不屬於指定城市",
+  path: ["district"]
+})
+// 3. 邏輯驗證
+.refine((data) => {
+  // 時間關係
   if (data.timeStart && data.timeEnd) {
     const [startHour, startMin] = data.timeStart.split(':').map(Number);
     const [endHour, endMin] = data.timeEnd.split(':').map(Number);
@@ -293,6 +326,7 @@ export const updateGigSchema = z.object({
   message: "結束時間必須晚於開始時間",
   path: ["timeEnd"]
 }).refine((data) => {
+  // 日期關係
   if (data.dateStart && data.dateEnd) {
     return data.dateEnd >= data.dateStart;
   }
@@ -301,8 +335,12 @@ export const updateGigSchema = z.object({
   message: "結束日期必須晚於或等於開始日期",
   path: ["dateEnd"]
 }).refine((data) => {
-  if (data.publishedAt && data.unlistedAt) {
-    return data.unlistedAt >= data.publishedAt;
+  // 刊登下架日期關係
+  const publishedAt = data.publishedAt;
+  const unlistedAt = data.unlistedAt;
+
+  if (publishedAt && unlistedAt) {
+    return unlistedAt >= publishedAt;
   }
   return true;
 }, {

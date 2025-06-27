@@ -7,7 +7,6 @@ import {
   integer,
   json,
   date,
-  jsonb,
 } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
 import { nanoid } from "@sitnik/nanoid";
@@ -41,9 +40,6 @@ export const workers = pgTable("workers", {
 
   // 持有證書（可能有多張，用 JSON 陣列存放）
   certificates: json("certificates"),
-
-  // 頭像
-  profilePhoto: json("profile_photo").default([]),
 
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),

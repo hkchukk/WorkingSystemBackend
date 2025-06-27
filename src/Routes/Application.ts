@@ -7,7 +7,7 @@ import {
 } from "../Middleware/guards.ts";
 import type IRouter from "../Interfaces/IRouter.ts";
 import dbClient from "../Client/DrizzleClient.ts";
-import { eq, and, desc, or } from "drizzle-orm";
+import { eq, and, desc, or, lte, sql } from "drizzle-orm";
 import { 
   gigs, 
   gigApplications
@@ -32,10 +32,13 @@ router.post(
       const { gigId } = params;
 
       // 檢查工作是否存在且為啟用狀態
+      const currentDate = new Date().toISOString().split('T')[0]; // YYYY-MM-DD 格式
       const gig = await dbClient.query.gigs.findFirst({
         where: and(
           eq(gigs.gigId, gigId),
-          eq(gigs.isActive, true)
+          eq(gigs.isActive, true),
+          lte(gigs.publishedAt, currentDate),
+          sql`(${gigs.unlistedAt} IS NULL OR ${gigs.unlistedAt} >= ${currentDate})`
         )
       });
 
@@ -46,19 +49,17 @@ router.post(
       }
 
       // 檢查工作是否已過期（根據 dateEnd）
-      const currentDate = new Date();
       const gigEndDate = new Date(gig.dateEnd);
-      if (gigEndDate < currentDate) {
+      if (gigEndDate < new Date()) {
         return response.status(400).send({
           message: "此工作已過期，無法申請",
         });
       }
 
-      // 檢查工作是否尚未開始招募（根據 publishedAt）
-      const publishedDate = new Date(gig.publishedAt);
-      if (publishedDate > currentDate) {
+      // 檢查工作是否已下架（根據 unlistedAt）
+      if (gig.unlistedAt && new Date(gig.unlistedAt) < new Date()) {
         return response.status(400).send({
-          message: "此工作尚未開始招募",
+          message: "此工作已下架，無法申請",
         });
       }
 

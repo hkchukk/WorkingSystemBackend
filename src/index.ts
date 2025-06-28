@@ -15,13 +15,13 @@ initStrategy();
 
 const app = nhttp({ stackError: false });
 
-app.use(cors({ origin: 'http://0.0.0.0:4321/', credentials: true }));
+app.use(cors({ origin: 'http://localhost:4321/', credentials: true }));
 
 app.use(
 	session({
 		cookie: { maxAge: 60000 * 60 * 24, secure: true },
 		store: new RedisStore({
-			client: new Redis(6379, "0.0.0.0"),
+			client: new Redis(6379, "172.17.0.2"),
 			prefix: "session:",
 		}),
 		resave: false,

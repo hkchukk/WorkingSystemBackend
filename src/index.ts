@@ -21,7 +21,7 @@ app.use(
 	session({
 		cookie: { maxAge: 60000 * 60 * 24, secure: true },
 		store: new RedisStore({
-			client: new Redis(6379),
+			client: new Redis(6379, "localhost"),
 			prefix: "session:",
 		}),
 		resave: false,
@@ -52,7 +52,7 @@ for await (const file of new Glob(`${__dirname}/Routes/**/*.ts`).scan({
 
 app.listen(3000, async () => {
 	console.log("🚀 Server is ready on port 3000");
-	
+
 	// 初始化 Redis 連接（用於快取）
 	try {
 		await redisClient.ping();

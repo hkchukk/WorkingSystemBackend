@@ -4,6 +4,8 @@ import Redis from "ioredis";
 const redisClient = new Redis({
 	maxRetriesPerRequest: 3,
 	lazyConnect: true,
+	host: "172.17.0.2",
+	port: 6379,
 });
 
 // 連接事件處理

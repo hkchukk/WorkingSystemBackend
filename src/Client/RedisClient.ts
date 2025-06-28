@@ -4,6 +4,7 @@ import Redis from "ioredis";
 const redisClient = new Redis({
 	maxRetriesPerRequest: 3,
 	lazyConnect: true,
+	host: Bun.env.REDISCONTAINERNAME ?? "0.0.0.0"
 });
 
 // 連接事件處理

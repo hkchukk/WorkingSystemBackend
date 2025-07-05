@@ -37,33 +37,15 @@ router.post(
           eq(gigs.gigId, gigId),
           eq(gigs.isActive, true),
           lte(gigs.publishedAt, currentDate.format('YYYY-MM-DD')),
+          gte(gigs.dateEnd, currentDate.format('YYYY-MM-DD')),
           sql`(${gigs.unlistedAt} IS NULL OR ${gigs.unlistedAt} >= ${currentDate.format('YYYY-MM-DD')})`
         )
       });
 
       if (!gig) {
         return response.status(404).send({
-          message: "工作不存在或已下架",
+          message: "工作不存在、已過期或已下架",
         });
-      }
-
-      // 檢查工作是否已過期（根據 dateEnd）
-      const gigEndDate = moment(gig.dateEnd);
-
-      if (currentDate.isAfter(gigEndDate)) {
-        return response.status(400).send({
-          message: "此工作已過期，無法申請",
-        });
-      }
-
-      // 檢查工作是否已下架（根據 unlistedAt）
-      if (gig.unlistedAt) {
-        const gigUnlistedAt = moment(gig.unlistedAt);
-        if (currentDate.isAfter(gigUnlistedAt)) {
-          return response.status(400).send({
-            message: "此工作已下架，無法申請",
-          });
-        }
       }
 
       // 檢查是否已經申請過這個工作（只有 pending 和 approved 狀態算作已申請）
@@ -126,7 +108,10 @@ router.post("/cancel/:applicationId", authenticated, requireWorker, async ({ use
       where: and(
         eq(gigApplications.applicationId, applicationId),
         eq(gigApplications.workerId, user.workerId)
-      )
+      ),
+      with: {
+        gig: true,
+      },
     });
 
     if (!application) {
@@ -243,7 +228,7 @@ router.get("/my-applications", authenticated, requireWorker, async ({ user, quer
  * Employer 查看工作申請詳情
  * GET /application/gig/:gigId
  */
-router.get("/gig/:gigId", authenticated, requireEmployer, async ({ user, params, query, response }) => {
+router.get("/gig/:gigId", authenticated, requireEmployer, requireApprovedEmployer, async ({ user, params, query, response }) => {
   try {
     const { gigId } = params;
     const { status, limit = 10, offset = 0 } = query;
@@ -364,6 +349,21 @@ router.put(
         });
       }
 
+      // 檢查工作是否已過期
+      const currentDate = moment().format('YYYY-MM-DD');
+      if (application.gig.dateEnd && application.gig.dateEnd < currentDate) {
+        return response.status(400).send({
+          message: "此工作已過期，無法審核申請",
+        });
+      }
+
+      // 檢查工作是否已下架
+      if (application.gig.unlistedAt && application.gig.unlistedAt < currentDate) {
+        return response.status(400).send({
+          message: "此工作已下架，無法審核申請",
+        });
+      }
+
       // 只有 pending 狀態的申請可以審核
       if (application.status !== "pending") {
         return response.status(400).send({
@@ -405,7 +405,7 @@ router.put(
  * Employer 查看所有工作的申請
  * GET /application/gig/all
  */
-router.get("/gig/all", authenticated, requireEmployer, async ({ user, query, response }) => {
+router.get("/gig/all", authenticated, requireEmployer, requireApprovedEmployer, async ({ user, query, response }) => {
   try {
     const { status, limit = 10, offset = 0 } = query;
 

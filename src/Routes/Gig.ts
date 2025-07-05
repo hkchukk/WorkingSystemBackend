@@ -509,6 +509,11 @@ router.put(
 				return response.status(404).send("工作不存在或無權限修改");
 			}
 
+			// 檢查工作是否已停用
+			if (!existingGig.isActive) {
+				return response.status(400).send("已停用的工作無法更新");
+			}
+
 			// 檢查是否有申請中或已核准的申請
 			const activeApplications = await dbClient.query.gigApplications.findFirst({
 				where: and(

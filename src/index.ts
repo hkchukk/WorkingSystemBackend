@@ -10,6 +10,7 @@ import { hash } from "@node-rs/argon2";
 import { argon2Config } from "./config.ts";
 import { Glob } from "bun";
 import redisClient from "./Client/RedisClient.ts";
+import CronManager from "./Utils/CronManager.ts";
 
 initStrategy();
 
@@ -59,5 +60,12 @@ app.listen(3000, async () => {
 		console.log("✅ Redis 快取連接成功");
 	} catch (error) {
 		console.error("❌ Redis 快取連接失敗:", error);
+	}
+
+	// 初始化 pg_cron 任務
+	try {
+		await CronManager.initializeCronJobs();
+	} catch (error) {
+		console.error("❌ pg_cron 初始化失敗:", error);
 	}
 });

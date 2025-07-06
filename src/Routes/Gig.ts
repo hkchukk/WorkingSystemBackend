@@ -6,7 +6,7 @@ import {
 } from "../Middleware/guards.ts";
 import type IRouter from "../Interfaces/IRouter.ts";
 import dbClient from "../Client/DrizzleClient.ts";
-import { eq, and, desc, sql, gte, lte } from "drizzle-orm";
+import { eq, and, desc, sql, gte, lte, or } from "drizzle-orm";
 import { gigs, gigApplications } from "../Schema/DatabaseSchema.ts";
 import validate from "@nhttp/zod";
 import { createGigSchema, updateGigSchema } from "../Middleware/validator.ts";
@@ -509,6 +509,26 @@ router.put(
 				return response.status(404).send("工作不存在或無權限修改");
 			}
 
+			// 檢查工作是否已停用
+			if (!existingGig.isActive) {
+				return response.status(400).send("已停用的工作無法更新");
+			}
+
+			// 檢查是否有申請中或已核准的申請
+			const activeApplications = await dbClient.query.gigApplications.findFirst({
+				where: and(
+					eq(gigApplications.gigId, gigId),
+					or(
+						eq(gigApplications.status, "pending"),
+						eq(gigApplications.status, "approved")
+					)
+				),
+			});
+
+			if (activeApplications) {
+				return response.status(400).send("此工作有申請中或已核准的申請者，無法更新");
+			}
+
 			const existingPhotos = await formatEnvironmentPhotos(existingGig.environmentPhotos) || [];
 			const {
 				environmentPhotosInfo,
@@ -584,15 +604,56 @@ router.patch(
 		try {
 			const { gigId } = params;
 
-			const existingGig = await dbClient.query.gigs.findFirst({
+			// 一次查詢獲取工作和申請資料
+			const gigWithApplications = await dbClient.query.gigs.findFirst({
 				where: and(eq(gigs.gigId, gigId), eq(gigs.employerId, user.employerId)),
+				with: {
+					gigApplications: {
+						where: or(
+							eq(gigApplications.status, "pending"),
+							eq(gigApplications.status, "approved")
+						),
+						limit: 1, // 只需要知道是否存在
+					},
+				},
 			});
 
-			if (!existingGig) {
+			if (!gigWithApplications) {
 				return response.status(404).send("工作不存在或無權限修改");
 			}
 
-			const newIsActive = !existingGig.isActive;
+			const today = moment().format("YYYY-MM-DD");
+			const hasActiveApplications = gigWithApplications.gigApplications.length > 0;
+
+			// 如果要停用工作，檢查限制條件
+			if (gigWithApplications.isActive) {
+				// 1. 檢查是否有申請中或已核准的申請
+				if (hasActiveApplications) {
+					return response.status(400).send({
+						message: "此工作有申請中或已核准的申請者，無法停用",
+					});
+				}
+
+				// 2. 檢查工作是否已下架
+				const isListed = !gigWithApplications.unlistedAt || gigWithApplications.unlistedAt >= today;
+				if (isListed) {
+					return response.status(400).send({
+						message: "請先下架工作再進行停用",
+					});
+				}
+			}
+
+			// 如果要啟用工作，檢查合理性限制
+			if (!gigWithApplications.isActive) {
+				// 檢查工作是否已過期
+				if (gigWithApplications.dateEnd && gigWithApplications.dateEnd < today) {
+					return response.status(400).send({
+						message: "工作已過期，無法啟用",
+					});
+				}
+			}
+
+			const newIsActive = !gigWithApplications.isActive;
 
 			await dbClient
 				.update(gigs)
@@ -607,6 +668,60 @@ router.patch(
 			});
 		} catch (error) {
 			console.error("切換工作狀態時出錯:", error);
+			return response.status(500).send("伺服器內部錯誤");
+		}
+	},
+);
+
+// 上架/下架工作
+router.patch(
+	"/:gigId/toggle-listing",
+	authenticated,
+	requireEmployer,
+	requireApprovedEmployer,
+	async ({ user, params, response }) => {
+		try {
+			const { gigId } = params;
+
+			const existingGig = await dbClient.query.gigs.findFirst({
+				where: and(eq(gigs.gigId, gigId), eq(gigs.employerId, user.employerId)),
+			});
+
+			if (!existingGig) {
+				return response.status(404).send("工作不存在或無權限修改");
+			}
+
+			const today = moment().format("YYYY-MM-DD");
+			const isCurrentlyListed = !existingGig.unlistedAt || existingGig.unlistedAt >= today;
+
+			// 如果要上架工作，需要檢查一些條件
+			if (!isCurrentlyListed) {
+				// 檢查工作是否已過期
+				if (existingGig.dateEnd && existingGig.dateEnd < today) {
+					return response.status(400).send("工作已過期，無法重新上架");
+				}
+
+				// 檢查工作是否被停用
+				if (!existingGig.isActive) {
+					return response.status(400).send("工作已停用，請先啟用工作");
+				}
+			}
+
+			const newUnlistedAt = isCurrentlyListed ? today : null;
+
+			await dbClient
+				.update(gigs)
+				.set({
+					unlistedAt: newUnlistedAt,
+					updatedAt: new Date(),
+				})
+				.where(eq(gigs.gigId, gigId));
+
+			return response.status(200).send({
+				message: `工作已${isCurrentlyListed ? "下架" : "上架"}`,
+			});
+		} catch (error) {
+			console.error("切換工作上架狀態時出錯:", error);
 			return response.status(500).send("伺服器內部錯誤");
 		}
 	},
@@ -630,18 +745,21 @@ router.delete(
 				return response.status(404).send("工作不存在或無權限刪除");
 			}
 
-			// 檢查是否有待處理的申請
-			const pendingApplications = await dbClient.query.gigApplications.findMany(
-				{
-					where: and(
-						eq(gigApplications.gigId, gigId),
-						eq(gigApplications.status, "pending"),
-					),
-				},
-			);
+			// 檢查工作必須先被停用
+			if (existingGig.isActive) {
+				return response.status(400).send("請先停用工作再進行刪除");
+			}
 
-			if (pendingApplications.length > 0) {
-				return response.status(400).send("有待處理的申請，無法刪除工作");
+			// 檢查是否有已核准的申請
+			const approvedApplications = await dbClient.query.gigApplications.findFirst({
+				where: and(
+					eq(gigApplications.gigId, gigId),
+					eq(gigApplications.status, "approved")
+				),
+			});
+
+			if (approvedApplications) {
+				return response.status(400).send("此工作有已核准的申請者，無法刪除");
 			}
 
 			await dbClient.delete(gigs).where(eq(gigs.gigId, gigId));
@@ -870,6 +988,7 @@ router.get("/employer/calendar", authenticated, requireEmployer, requireApproved
 		
 		return response.status(200).send({
 			gigs: calendarGigs,
+			count: calendarGigs.length,
 			queryInfo: {
 				year: year || null,
 				month: month || null,

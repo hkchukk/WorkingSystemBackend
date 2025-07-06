@@ -282,9 +282,9 @@ router.post(
   },
 );
 
-router.get("/logout", ({ session }) => {
+router.get("/logout", ({ response, session }) => {
   session.destroy();
-  return "Logged out";
+  return response.status(200).send("Logged out successfully");
 });
 
 router.get("/profile", authenticated, async ({ user, response }) => {

@@ -352,12 +352,35 @@ router.get(
 	requireEmployer,
 	async ({ user, response, query }) => {
 		try {
-			const { limit = 10, offset = 0 } = query;
+			const { limit = 10, offset = 0, status } = query;
 			const requestLimit = Number.parseInt(limit);
 			const requestOffset = Number.parseInt(offset);
+			const currentDate = moment().format('YYYY-MM-DD');
+
+			// 建立基本查詢條件
+			const whereConditions = [eq(gigs.employerId, user.employerId)];
+
+			// 根據狀態參數添加日期條件
+			if (status && ['not_started', 'ongoing', 'completed'].includes(status)) {
+				if (status === 'not_started') {
+					// 未開始：dateStart > currentDate
+					whereConditions.push(sql`${gigs.dateStart} > ${currentDate}`);
+				} else if (status === 'completed') {
+					// 已結束：dateEnd < currentDate
+					whereConditions.push(sql`${gigs.dateEnd} < ${currentDate}`);
+				} else if (status === 'ongoing') {
+					// 進行中：dateStart <= currentDate AND dateEnd >= currentDate
+					whereConditions.push(
+						and(
+							sql`${gigs.dateStart} <= ${currentDate}`,
+							sql`${gigs.dateEnd} >= ${currentDate}`
+						)
+					);
+				}
+			}
 
 			const myGigs = await dbClient.query.gigs.findMany({
-				where: eq(gigs.employerId, user.employerId),
+				where: and(...whereConditions),
 				orderBy: [desc(gigs.createdAt)],
 				columns: {
 					gigId: true,
@@ -924,6 +947,16 @@ router.get("/employer/calendar", authenticated, requireEmployer, requireApproved
 			dateEnd 
 		} = query;
 		
+		// 檢查是否提供了必要的日期參數
+		const hasYearMonth = year && month;
+		const hasDateRange = dateStart || dateEnd;
+		
+		if (!hasYearMonth && !hasDateRange) {
+			return response.status(400).send({
+				error: "必須提供年月參數 (year, month) 或日期範圍參數 (dateStart, dateEnd)"
+			});
+		}
+		
 		const currentDate = moment().format('YYYY-MM-DD');
 		const whereConditions = [
 			eq(gigs.employerId, user.employerId),
@@ -933,7 +966,7 @@ router.get("/employer/calendar", authenticated, requireEmployer, requireApproved
 		];
 		
 		// 處理日期查詢邏輯
-		if (year && month) {
+		if (hasYearMonth) {
 			// 月份查詢模式
 			const yearNum = Number.parseInt(year);
 			const monthNum = Number.parseInt(month);
@@ -956,21 +989,10 @@ router.get("/employer/calendar", authenticated, requireEmployer, requireApproved
 					gte(gigs.dateEnd, startDate)
 				)
 			);
-		} else if (dateStart || dateEnd) {
+		} else if (hasDateRange) {
 			// 自訂日期範圍模式
 			dateStart ? whereConditions.push(gte(gigs.dateStart, dateStart)) : null;
 			dateEnd ? whereConditions.push(lte(gigs.dateEnd, dateEnd)) : null;
-		} else {
-			// 預設顯示當月
-			const startDate = moment(currentDate).startOf('month').format('YYYY-MM-DD');
-			const endDate = moment(currentDate).endOf('month').format('YYYY-MM-DD');
-			
-			whereConditions.push(
-				and(
-					lte(gigs.dateStart, endDate),
-					gte(gigs.dateEnd, startDate)
-				)
-			);
 		}
 		
 		const calendarGigs = await dbClient.query.gigs.findMany({
@@ -994,9 +1016,6 @@ router.get("/employer/calendar", authenticated, requireEmployer, requireApproved
 				month: month || null,
 				dateStart: dateStart || null,
 				dateEnd: dateEnd || null,
-				isMonthQuery: !!(year && month),
-				isRangeQuery: !!(dateStart || dateEnd),
-				isDefaultMonth: !(year && month) && !(dateStart || dateEnd)
 			}
 		});
 		

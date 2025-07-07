@@ -85,9 +85,7 @@ export class CronManager {
             "is_active" = false,
             "updated_at" = NOW()
           WHERE 
-            "date_end" = taipei_today
-            AND "is_active" = true
-            AND ("unlisted_at" IS NULL OR "unlisted_at" > taipei_today);
+            "date_end" = taipei_today;
         END;
         $$;
       `;

@@ -10,7 +10,8 @@ import dbClient from "../Client/DrizzleClient.ts";
 import { eq, and, desc, or, lte, sql, gte } from "drizzle-orm";
 import {
   gigs,
-  gigApplications
+  gigApplications,
+  employers
 } from "../Schema/DatabaseSchema.ts";
 import validate from "@nhttp/zod";
 import { reviewApplicationSchema } from "../Middleware/validator.ts";
@@ -108,10 +109,7 @@ router.post("/cancel/:applicationId", authenticated, requireWorker, async ({ use
       where: and(
         eq(gigApplications.applicationId, applicationId),
         eq(gigApplications.workerId, user.workerId)
-      ),
-      with: {
-        gig: true,
-      },
+      )
     });
 
     if (!application) {
@@ -217,6 +215,121 @@ router.get("/my-applications", authenticated, requireWorker, async ({ user, quer
     console.error("查看申請記錄時發生錯誤:", error);
     return response.status(500).send({
       message: "獲取申請記錄失敗",
+      error: error instanceof Error ? error.message : "未知錯誤",
+    });
+  }
+});
+
+/**
+ * Worker 行事曆 - 查看已核准的工作行程
+ * GET /application/worker/calendar
+ */
+router.get("/worker/calendar", authenticated, requireWorker, async ({ user, query, response }) => {
+  try {
+    const { 
+      year, 
+      month, 
+      dateStart, 
+      dateEnd 
+    } = query;
+    
+    // 檢查是否提供了必要的日期參數
+    const hasYearMonth = year && month;
+    const hasDateRange = dateStart || dateEnd;
+    
+    if (!hasYearMonth && !hasDateRange) {
+      return response.status(400).send({
+        error: "必須提供年月參數 (year, month) 或日期範圍參數 (dateStart, dateEnd)"
+      });
+    }
+
+    // 建立基本查詢條件
+    const whereConditions = [
+      eq(gigApplications.workerId, user.workerId),
+      eq(gigApplications.status, "approved")
+    ];
+    
+    // 根據日期參數添加過濾條件
+    if (hasYearMonth) {
+      // 月份查詢模式
+      const yearNum = Number.parseInt(year);
+      const monthNum = Number.parseInt(month);
+      
+      if (yearNum < 2020 || yearNum > 2050 || monthNum < 1 || monthNum > 12) {
+        return response.status(400).send({
+          error: "年份必須在 2020-2050 之間，月份必須在 1-12 之間"
+        });
+      }
+      
+      const startDate = moment(`${yearNum}-${monthNum.toString().padStart(2, '0')}-01`).format('YYYY-MM-DD');
+      const endDate = moment(startDate).endOf('month').format('YYYY-MM-DD');
+      
+      // 過濾工作期間與該月有重疊的工作
+      whereConditions.push(
+        and(
+          lte(gigs.dateStart, endDate),
+          gte(gigs.dateEnd, startDate)
+        )
+      );
+    } else if (hasDateRange) {
+      // 自訂日期範圍模式
+      dateStart ? whereConditions.push(gte(gigs.dateStart, dateStart)) : null;
+      dateEnd ? whereConditions.push(lte(gigs.dateEnd, dateEnd)) : null;
+    }
+
+    // 執行資料庫查詢
+    const results = await dbClient
+      .select({
+        gigId: gigs.gigId,
+        title: gigs.title,
+        dateStart: gigs.dateStart,
+        dateEnd: gigs.dateEnd,
+        timeStart: gigs.timeStart,
+        timeEnd: gigs.timeEnd,
+        employerId: employers.employerId,
+        employerName: employers.employerName,
+        branchName: employers.branchName
+      })
+      .from(gigApplications)
+      .innerJoin(gigs, eq(gigApplications.gigId, gigs.gigId))
+      .innerJoin(employers, eq(gigs.employerId, employers.employerId))
+      .where(and(...whereConditions))
+      .orderBy(gigs.dateStart, gigs.timeStart);
+
+    const calendarGigs = results.map(row => {
+      return {
+        gigId: row.gigId,
+        title: row.title,
+        dateStart: row.dateStart,
+        dateEnd: row.dateEnd,
+        timeStart: row.timeStart,
+        timeEnd: row.timeEnd,
+        employer: {
+          employerId: row.employerId,
+          employerName: row.employerName,
+          branchName: row.branchName
+        },
+      };
+    });
+
+    return response.status(200).send({
+      message: "獲取 Worker 行事曆成功",
+      data: {
+        gigs: calendarGigs,
+        count: calendarGigs.length,
+        queryInfo: {
+          year: year || null,
+          month: month || null,
+          dateStart: dateStart || null,
+          dateEnd: dateEnd || null,
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error("獲取 Worker 行事曆時發生錯誤:", error);
+    return response.status(500).send({
+      message: "獲取 Worker 行事曆失敗",
       error: error instanceof Error ? error.message : "未知錯誤",
     });
   }
@@ -354,13 +467,6 @@ router.put(
       if (application.gig.dateEnd && application.gig.dateEnd < currentDate) {
         return response.status(400).send({
           message: "此工作已過期，無法審核申請",
-        });
-      }
-
-      // 檢查工作是否已下架
-      if (application.gig.unlistedAt && application.gig.unlistedAt < currentDate) {
-        return response.status(400).send({
-          message: "此工作已下架，無法審核申請",
         });
       }
 

@@ -1,0 +1,1 @@
+ALTER TABLE "workers" ADD COLUMN "job_experience" json DEFAULT '[]'::json;

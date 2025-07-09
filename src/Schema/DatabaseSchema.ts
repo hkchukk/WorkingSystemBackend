@@ -41,6 +41,8 @@ export const workers = pgTable("workers", {
   // 持有證書（可能有多張，用 JSON 陣列存放）
   certificates: json("certificates"),
 
+  jobExperience: json("job_experience").default([]),
+
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });

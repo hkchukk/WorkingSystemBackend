@@ -29,4 +29,28 @@ router.get("/pendingEmployer", authenticated, requireAdmin, async (rev) => {
 	return pendingEmployers;
 });
 
+router.patch(
+	"/approveEmployer/:id",
+	authenticated,
+	requireAdmin,
+	async (rev) => {
+		const { id } = rev.params;
+		const employerExists = await dbClient.query.employers.findFirst({
+			where: eq(employers.employerId, id),
+		});
+		if (!employerExists) {
+			return rev.error(404, "Employer not found");
+		}
+		if (employerExists.approvalStatus !== "pending") {
+			return rev.error(400, "Employer is not pending approval");
+		}
+		const updatedEmployer = await dbClient
+			.update(employers)
+			.set({ approvalStatus: "approved" })
+			.where(eq(employers.employerId, id))
+			.returning();
+		return updatedEmployer[0];
+	},
+);
+
 export default { path: "/admin", router } as IRouter;

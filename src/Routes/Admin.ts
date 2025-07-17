@@ -39,10 +39,10 @@ router.patch(
 			where: eq(employers.employerId, id),
 		});
 		if (!employerExists) {
-			return rev.error(404, "Employer not found");
+			return rev.response.status(404).send("Employer not found");
 		}
 		if (employerExists.approvalStatus !== "pending") {
-			return rev.error(400, "Employer is not pending approval");
+			return rev.response.status(400).send("Employer is not pending approval");
 		}
 		const updatedEmployer = await dbClient
 			.update(employers)

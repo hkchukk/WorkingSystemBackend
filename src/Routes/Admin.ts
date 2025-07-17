@@ -50,8 +50,9 @@ router.patch(
 			.set({ approvalStatus: "approved" })
 			.where(eq(employers.employerId, id))
 			.returning();
+		// TODO: Fill in email details
 		await emailClient.sendMail({
-			from: ``,
+			from: "",
 			to: employerFound.email,
 			subject: "",
 			text: ""

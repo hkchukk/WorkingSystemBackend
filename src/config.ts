@@ -9,6 +9,7 @@ export const argon2Config: Options = {
   secret: new TextEncoder().encode(process.env.HASHINGSECRET),
 };
 
+//TODO: Fill in email server details and authenticate information
 export const emailConfig: EmailOptions = {
   host: "",
   port: 587,

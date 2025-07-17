@@ -9,6 +9,7 @@ import validate from "@nhttp/zod";
 import { adminRegister } from "../Middleware/validator";
 import { hash } from "@node-rs/argon2";
 import { argon2Config } from "../config";
+import { emailClient } from "../Client/EmailClient";
 
 const router = new Router();
 
@@ -35,13 +36,13 @@ router.patch(
 	requireAdmin,
 	async (rev) => {
 		const { id } = rev.params;
-		const employerExists = await dbClient.query.employers.findFirst({
+		const employerFound = await dbClient.query.employers.findFirst({
 			where: eq(employers.employerId, id),
 		});
-		if (!employerExists) {
+		if (!employerFound) {
 			return rev.response.status(404).send("Employer not found");
 		}
-		if (employerExists.approvalStatus !== "pending") {
+		if (employerFound.approvalStatus !== "pending") {
 			return rev.response.status(400).send("Employer is not pending approval");
 		}
 		const updatedEmployer = await dbClient
@@ -49,6 +50,12 @@ router.patch(
 			.set({ approvalStatus: "approved" })
 			.where(eq(employers.employerId, id))
 			.returning();
+		await emailClient.sendMail({
+			from: ``,
+			to: employerFound.email,
+			subject: "",
+			text: ""
+		})
 		return updatedEmployer[0];
 	},
 );

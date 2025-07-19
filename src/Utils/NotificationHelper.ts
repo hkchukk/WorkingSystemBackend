@@ -17,48 +17,6 @@ interface NotificationParams {
 
 class NotificationHelper {
   
-  // 通知模板定義
-  private static readonly TEMPLATES = {
-    application_received: (workerName: string, gigTitle: string) => ({
-      title: "收到新的工作申請",
-      message: `${workerName} 申請了您的工作「${gigTitle}」，請及時處理。`
-    }),
-    application_approved: (gigTitle: string, employerName: string) => ({
-      title: "工作申請已通過",
-      message: `恭喜！您申請的工作「${gigTitle}」已被 ${employerName} 核准。`
-    }),
-    application_rejected: (gigTitle: string, employerName: string, reason?: string) => ({
-      title: "工作申請未通過",
-      message: reason 
-        ? `很抱歉，您申請的工作「${gigTitle}」被 ${employerName} 拒絕。原因：${reason}`
-        : `很抱歉，您申請的工作「${gigTitle}」被 ${employerName} 拒絕。`
-    }),
-    rating_received: (raterName: string, rating: number) => ({
-      title: "收到新評價",
-      message: `${raterName} 給了您 ${rating} 星評價，快去查看吧！`
-    }),
-    gig_published: (gigTitle: string) => ({
-      title: "工作刊登成功",
-      message: `您的工作「${gigTitle}」已成功刊登，等待打工者申請中。`
-    }),
-    account_approved: (accountName: string) => ({
-      title: "帳戶審核通過",
-      message: `恭喜！您的帳戶「${accountName}」已通過審核，現在可以開始使用所有功能。`
-    }),
-    account_rejected: (accountName: string, reason?: string) => ({
-      title: "帳戶審核未通過",
-      message: reason
-        ? `很抱歉，您的帳戶「${accountName}」審核未通過。原因：${reason}`
-        : `很抱歉，您的帳戶「${accountName}」審核未通過，請聯繫客服了解詳情。`
-    }),
-    user_welcome: (userName: string, userType: "worker" | "employer") => ({
-      title: userType === "worker" ? "歡迎加入打工平台！" : "歡迎加入商家平台！",
-      message: userType === "worker"
-        ? `${userName}，歡迎您加入我們的打工平台！您現在可以開始瀏覽和申請工作機會。`
-        : `${userName}，歡迎您加入我們的平台！您的帳戶正在審核中，審核通過後即可開始發佈工作。`
-    })
-  } as const;
-  
   /**
    * 建立單一通知
    */
@@ -99,49 +57,90 @@ class NotificationHelper {
     }
   }
 
-  /**
-   * 使用模板創建通知
-   */
-  private static async createFromTemplate(
-    receiverId: string,
-    templateKey: keyof typeof NotificationHelper.TEMPLATES,
-    ...args: any[]
-  ): Promise<boolean> {
-    const { title, message } = (this.TEMPLATES[templateKey] as any)(...args);
-    return this.create({ receiverId, title, message, type: templateKey as NotificationType });
-  }
-
   // ========== 具體通知方法 ==========
   static async notifyApplicationReceived(employerId: string, workerName: string, gigTitle: string) {
-    return this.createFromTemplate(employerId, "application_received", workerName, gigTitle);
+    return this.create({
+      receiverId: employerId,
+      title: "收到新的工作申請",
+      message: `${workerName} 申請了您的工作「${gigTitle}」，請及時處理。`,
+      type: "application_received"
+    });
   }
 
   static async notifyApplicationApproved(workerId: string, gigTitle: string, employerName: string) {
-    return this.createFromTemplate(workerId, "application_approved", gigTitle, employerName);
+    return this.create({
+      receiverId: workerId,
+      title: "工作申請已通過",
+      message: `恭喜！您申請的工作「${gigTitle}」已被 ${employerName} 核准。`,
+      type: "application_approved"
+    });
   }
 
   static async notifyApplicationRejected(workerId: string, gigTitle: string, employerName: string, reason?: string) {
-    return this.createFromTemplate(workerId, "application_rejected", gigTitle, employerName, reason);
+    const message = reason 
+      ? `很抱歉，您申請的工作「${gigTitle}」被 ${employerName} 拒絕。原因：${reason}`
+      : `很抱歉，您申請的工作「${gigTitle}」被 ${employerName} 拒絕。`;
+    
+    return this.create({
+      receiverId: workerId,
+      title: "工作申請未通過",
+      message,
+      type: "application_rejected"
+    });
   }
 
   static async notifyRatingReceived(receiverId: string, raterName: string, rating: number) {
-    return this.createFromTemplate(receiverId, "rating_received", raterName, rating);
+    return this.create({
+      receiverId,
+      title: "收到新評價",
+      message: `${raterName} 給了您 ${rating} 星評價，快去查看吧！`,
+      type: "rating_received"
+    });
   }
 
   static async notifyGigPublished(employerId: string, gigTitle: string) {
-    return this.createFromTemplate(employerId, "gig_published", gigTitle);
+    return this.create({
+      receiverId: employerId,
+      title: "工作刊登成功",
+      message: `您的工作「${gigTitle}」已成功刊登，等待打工者申請中。`,
+      type: "gig_published"
+    });
   }
 
   static async notifyAccountApproved(userId: string, accountName: string) {
-    return this.createFromTemplate(userId, "account_approved", accountName);
+    return this.create({
+      receiverId: userId,
+      title: "帳戶審核通過",
+      message: `恭喜！您的帳戶「${accountName}」已通過審核，現在可以開始使用所有功能。`,
+      type: "account_approved"
+    });
   }
 
   static async notifyAccountRejected(userId: string, accountName: string, reason?: string) {
-    return this.createFromTemplate(userId, "account_rejected", accountName, reason);
+    const message = reason
+      ? `很抱歉，您的帳戶「${accountName}」審核未通過。原因：${reason}`
+      : `很抱歉，您的帳戶「${accountName}」審核未通過，請聯繫客服了解詳情。`;
+    
+    return this.create({
+      receiverId: userId,
+      title: "帳戶審核未通過",
+      message,
+      type: "account_rejected"
+    });
   }
 
   static async notifyUserWelcome(userId: string, userName: string, userType: "worker" | "employer") {
-    return this.createFromTemplate(userId, "user_welcome", userName, userType);
+    const title = userType === "worker" ? "歡迎加入打工平台！" : "歡迎加入商家平台！";
+    const message = userType === "worker"
+      ? `${userName}，歡迎您加入我們的打工平台！您現在可以開始瀏覽和申請工作機會。`
+      : `${userName}，歡迎您加入我們的平台！您的帳戶正在審核中，審核通過後即可開始發佈工作。`;
+    
+    return this.create({
+      receiverId: userId,
+      title,
+      message,
+      type: "user_welcome"
+    });
   }
 
   /**

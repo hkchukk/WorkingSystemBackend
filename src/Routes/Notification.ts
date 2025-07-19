@@ -129,34 +129,6 @@ router.put("/mark-as-read", authenticated, validate(markAsReadSchema), async ({ 
   }
 });
 
-// 標記所有通知為已讀
-router.put("/mark-all-as-read", authenticated, async ({ user, response }) => {
-  try {
-    const currentDate = new Date();
-
-    await dbClient
-      .update(notifications)
-      .set({
-        isRead: true,
-        readAt: currentDate,
-        updatedAt: currentDate,
-      })
-      .where(and(
-        eq(notifications.receiverId, user.workerId || user.employerId || user.adminId)
-      ));
-
-    return response.status(200).json({
-      message: "成功標記所有通知為已讀",
-    });
-
-  } catch (error) {
-    console.error("標記所有通知已讀失敗:", error);
-    return response.status(500).json({
-      message: "標記所有通知已讀失敗",
-    });
-  }
-});
-
 // 建立通知 (管理員或系統內部使用)
 router.post("/create", authenticated, validate(createNotificationSchema), async ({ body, response }) => {
   try {

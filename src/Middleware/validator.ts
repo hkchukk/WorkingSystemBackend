@@ -364,6 +364,26 @@ export const markAsReadSchema = z.object({
   notificationIds: z.array(z.string()).min(1, "至少需要一個通知ID"),
 });
 
+export const createBatchNotificationSchema = z.object({
+  receiverIds: z.array(z.string()).min(1, "至少需要一個接收者ID"),
+  title: z.string().min(1, "標題不能為空").max(256, "標題過長"),
+  message: z.string().min(1, "訊息不能為空"),
+  type: z.string().min(1, "通知類型不能為空"),
+});
+
+export const createGroupNotificationSchema = z.object({
+  groups: z.object({
+    workers: z.boolean().optional(),
+    employers: z.boolean().optional(),
+    admins: z.boolean().optional(),
+  }).refine(data => Object.values(data).some(Boolean), {
+    message: "至少需要選擇一個用戶群組"
+  }),
+  title: z.string().min(1, "標題不能為空").max(256, "標題過長"),
+  message: z.string().min(1, "訊息不能為空"),
+  type: z.string().min(1, "通知類型不能為空"),
+});
+
 export const adminRegister = z.object({
   email: z.string().email("Invalid email format"),
   password: z.string().min(8, "Password must be at least 8 characters")

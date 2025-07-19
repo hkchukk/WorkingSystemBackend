@@ -1,29 +1,15 @@
 import dbClient from "../Client/DrizzleClient.ts";
-import { notifications } from "../Schema/DatabaseSchema.ts";
+import { notifications, workers, employers, admins } from "../Schema/DatabaseSchema.ts";
 
 // 通知類型定義
 export type NotificationType = 
-  | "application_received"
-  | "application_approved" 
-  | "application_rejected"
-  | "rating_received"
-  | "gig_published"
-  | "gig_expired"
-  | "account_approved"
-  | "account_rejected"
-  | "user_welcome"
-  | "system_announcement"
-  | "other";
+  | "application_received" | "application_approved" | "application_rejected"
+  | "rating_received" | "gig_published" | "gig_expired"
+  | "account_approved" | "account_rejected" | "user_welcome"
+  | "system_announcement" | "other";
 
-interface CreateNotificationParams {
+interface NotificationParams {
   receiverId: string;
-  title: string;
-  message: string;
-  type: NotificationType;
-}
-
-interface BatchNotificationParams {
-  receiverIds: string[];
   title: string;
   message: string;
   type: NotificationType;
@@ -31,19 +17,54 @@ interface BatchNotificationParams {
 
 class NotificationHelper {
   
+  // 通知模板定義
+  private static readonly TEMPLATES = {
+    application_received: (workerName: string, gigTitle: string) => ({
+      title: "收到新的工作申請",
+      message: `${workerName} 申請了您的工作「${gigTitle}」，請及時處理。`
+    }),
+    application_approved: (gigTitle: string, employerName: string) => ({
+      title: "工作申請已通過",
+      message: `恭喜！您申請的工作「${gigTitle}」已被 ${employerName} 核准。`
+    }),
+    application_rejected: (gigTitle: string, employerName: string, reason?: string) => ({
+      title: "工作申請未通過",
+      message: reason 
+        ? `很抱歉，您申請的工作「${gigTitle}」被 ${employerName} 拒絕。原因：${reason}`
+        : `很抱歉，您申請的工作「${gigTitle}」被 ${employerName} 拒絕。`
+    }),
+    rating_received: (raterName: string, rating: number) => ({
+      title: "收到新評價",
+      message: `${raterName} 給了您 ${rating} 星評價，快去查看吧！`
+    }),
+    gig_published: (gigTitle: string) => ({
+      title: "工作刊登成功",
+      message: `您的工作「${gigTitle}」已成功刊登，等待打工者申請中。`
+    }),
+    account_approved: (accountName: string) => ({
+      title: "帳戶審核通過",
+      message: `恭喜！您的帳戶「${accountName}」已通過審核，現在可以開始使用所有功能。`
+    }),
+    account_rejected: (accountName: string, reason?: string) => ({
+      title: "帳戶審核未通過",
+      message: reason
+        ? `很抱歉，您的帳戶「${accountName}」審核未通過。原因：${reason}`
+        : `很抱歉，您的帳戶「${accountName}」審核未通過，請聯繫客服了解詳情。`
+    }),
+    user_welcome: (userName: string, userType: "worker" | "employer") => ({
+      title: userType === "worker" ? "歡迎加入打工平台！" : "歡迎加入商家平台！",
+      message: userType === "worker"
+        ? `${userName}，歡迎您加入我們的打工平台！您現在可以開始瀏覽和申請工作機會。`
+        : `${userName}，歡迎您加入我們的平台！您的帳戶正在審核中，審核通過後即可開始發佈工作。`
+    })
+  } as const;
+  
   /**
    * 建立單一通知
    */
-  static async createNotification(params: CreateNotificationParams): Promise<boolean> {
+  static async create(params: NotificationParams): Promise<boolean> {
     try {
-      await dbClient.insert(notifications).values({
-        receiverId: params.receiverId,
-        title: params.title,
-        message: params.message,
-        type: params.type,
-      });
-
-      console.log(`通知已建立 - 接收者: ${params.receiverId}, 類型: ${params.type}`);
+      await dbClient.insert(notifications).values(params);
       return true;
     } catch (error) {
       console.error("建立通知失敗:", error);
@@ -54,33 +75,23 @@ class NotificationHelper {
   /**
    * 批量建立通知
    */
-  static async createBatchNotifications(params: BatchNotificationParams): Promise<boolean> {
+  static async createBatch(receiverIds: string[], params: Omit<NotificationParams, 'receiverId'>): Promise<boolean> {
+    if (receiverIds.length === 0) return true;
+
     try {
-      if (params.receiverIds.length === 0) {
-        console.log("沒有接收者，跳過通知發送");
-        return true;
-      }
-
-      // 分批處理，每批最多 1000 個用戶，避免資料庫負載過大
       const BATCH_SIZE = 1000;
-      const batches = this.chunkArray(params.receiverIds, BATCH_SIZE);
       
-      console.log(`開始批量發送通知 - 總接收者: ${params.receiverIds.length}, 分為 ${batches.length} 批`);
-
-      for (let i = 0; i < batches.length; i++) {
-        const batch = batches[i];
-        const notificationData = batch.map(receiverId => ({
-          receiverId,
-          title: params.title,
-          message: params.message,
-          type: params.type,
-        }));
-
-        await dbClient.insert(notifications).values(notificationData);
-        console.log(`第 ${i + 1}/${batches.length} 批通知已發送 (${batch.length} 個接收者)`);
+      // 序列處理批次
+      for (let i = 0; i < receiverIds.length; i += BATCH_SIZE) {
+        const batch = receiverIds.slice(i, i + BATCH_SIZE);
+        const data = batch.map(receiverId => ({ receiverId, ...params }));
+        await dbClient.insert(notifications).values(data);
+        
+        // 如果還有更多批次，稍微等待避免壓力過大
+        if (i + BATCH_SIZE < receiverIds.length) {
+          await new Promise(resolve => setTimeout(resolve, 10)); // 10ms 延遲
+        }
       }
-      
-      console.log(`批量通知發送完成 - 總數: ${params.receiverIds.length}, 類型: ${params.type}`);
       return true;
     } catch (error) {
       console.error("批量建立通知失敗:", error);
@@ -89,194 +100,100 @@ class NotificationHelper {
   }
 
   /**
-   * 將陣列分割成指定大小的批次
+   * 使用模板創建通知
    */
-  private static chunkArray<T>(array: T[], chunkSize: number): T[][] {
-    const chunks: T[][] = [];
-    for (let i = 0; i < array.length; i += chunkSize) {
-      chunks.push(array.slice(i, i + chunkSize));
-    }
-    return chunks;
-  }
-
-  /**
-   * 工作申請相關通知
-   */
-  static async notifyApplicationReceived(
-    employerId: string,
-    workerName: string,
-    gigTitle: string,
-  ): Promise<boolean> {
-    return this.createNotification({
-      receiverId: employerId,
-      title: "收到新的工作申請",
-      message: `${workerName} 申請了您的工作「${gigTitle}」，請及時處理。`,
-      type: "application_received",
-    });
-  }
-
-  static async notifyApplicationApproved(
-    workerId: string,
-    gigTitle: string,
-    employerName: string,
-  ): Promise<boolean> {
-    return this.createNotification({
-      receiverId: workerId,
-      title: "工作申請已通過",
-      message: `恭喜！您申請的工作「${gigTitle}」已被 ${employerName} 核准。`,
-      type: "application_approved",
-    });
-  }
-
-  static async notifyApplicationRejected(
-    workerId: string,
-    gigTitle: string,
-    employerName: string,
-    reason?: string
-  ): Promise<boolean> {
-    const message = reason 
-      ? `很抱歉，您申請的工作「${gigTitle}」被 ${employerName} 拒絕。原因：${reason}`
-      : `很抱歉，您申請的工作「${gigTitle}」被 ${employerName} 拒絕。`;
-
-    return this.createNotification({
-      receiverId: workerId,
-      title: "工作申請未通過",
-      message,
-      type: "application_rejected",
-    });
-  }
-
-  /**
-   * 評價相關通知
-   */
-  static async notifyRatingReceived(
+  private static async createFromTemplate(
     receiverId: string,
-    raterName: string,
-    rating: number,
+    templateKey: keyof typeof NotificationHelper.TEMPLATES,
+    ...args: any[]
   ): Promise<boolean> {
-    return this.createNotification({
-      receiverId,
-      title: "收到新評價",
-      message: `${raterName} 給了您 ${rating} 星評價，快去查看吧！`,
-      type: "rating_received",
-    });
+    const { title, message } = (this.TEMPLATES[templateKey] as any)(...args);
+    return this.create({ receiverId, title, message, type: templateKey as NotificationType });
+  }
+
+  // ========== 具體通知方法 ==========
+  static async notifyApplicationReceived(employerId: string, workerName: string, gigTitle: string) {
+    return this.createFromTemplate(employerId, "application_received", workerName, gigTitle);
+  }
+
+  static async notifyApplicationApproved(workerId: string, gigTitle: string, employerName: string) {
+    return this.createFromTemplate(workerId, "application_approved", gigTitle, employerName);
+  }
+
+  static async notifyApplicationRejected(workerId: string, gigTitle: string, employerName: string, reason?: string) {
+    return this.createFromTemplate(workerId, "application_rejected", gigTitle, employerName, reason);
+  }
+
+  static async notifyRatingReceived(receiverId: string, raterName: string, rating: number) {
+    return this.createFromTemplate(receiverId, "rating_received", raterName, rating);
+  }
+
+  static async notifyGigPublished(employerId: string, gigTitle: string) {
+    return this.createFromTemplate(employerId, "gig_published", gigTitle);
+  }
+
+  static async notifyAccountApproved(userId: string, accountName: string) {
+    return this.createFromTemplate(userId, "account_approved", accountName);
+  }
+
+  static async notifyAccountRejected(userId: string, accountName: string, reason?: string) {
+    return this.createFromTemplate(userId, "account_rejected", accountName, reason);
+  }
+
+  static async notifyUserWelcome(userId: string, userName: string, userType: "worker" | "employer") {
+    return this.createFromTemplate(userId, "user_welcome", userName, userType);
   }
 
   /**
-   * 工作刊登相關通知
+   * 獲取用戶群組ID列表
    */
-  static async notifyGigPublished(
-    employerId: string,
-    gigTitle: string,
-  ): Promise<boolean> {
-    return this.createNotification({
-      receiverId: employerId,
-      title: "工作刊登成功",
-      message: `您的工作「${gigTitle}」已成功刊登，等待打工者申請中。`,
-      type: "gig_published",
-    });
-  }
-
-  /**
-   * 帳戶審核相關通知
-   */
-  static async notifyAccountApproved(
-    userId: string,
-    accountName: string
-  ): Promise<boolean> {
-    return this.createNotification({
-      receiverId: userId,
-      title: "帳戶審核通過",
-      message: `恭喜！您的帳戶「${accountName}」已通過審核，現在可以開始使用所有功能。`,
-      type: "account_approved",
-    });
-  }
-
-  static async notifyAccountRejected(
-    userId: string,
-    accountName: string,
-    reason?: string
-  ): Promise<boolean> {
-    const message = reason 
-      ? `很抱歉，您的帳戶「${accountName}」審核未通過。原因：${reason}`
-      : `很抱歉，您的帳戶「${accountName}」審核未通過，請聯繫客服了解詳情。`;
-
-    return this.createNotification({
-      receiverId: userId,
-      title: "帳戶審核未通過",
-      message,
-      type: "account_rejected",
-    });
-  }
-
-  /**
-   * 系統公告通知
-   */
-  static async notifySystemAnnouncement(
-    receiverIds: string[],
-    title: string,
-    message: string
-  ): Promise<boolean> {
-    return this.createBatchNotifications({
-      receiverIds,
-      title,
-      message,
-      type: "system_announcement",
-    });
-  }
-
-  /**
-   * 用戶註冊歡迎通知
-   */
-  static async notifyUserWelcome(
-    userId: string,
-    userName: string,
-    userType: "worker" | "employer"
-  ): Promise<boolean> {
-    const welcomeMessages = {
-      worker: {
-        title: "歡迎加入打工平台！",
-        message: `${userName}，歡迎您加入我們的打工平台！您現在可以開始瀏覽和申請工作機會。`
-      },
-      employer: {
-        title: "歡迎加入商家平台！",
-        message: `${userName}，歡迎您加入我們的平台！您的帳戶正在審核中，審核通過後即可開始發佈工作。`
-      }
-    };
-
-    const { title, message } = welcomeMessages[userType];
-
-    return this.createNotification({
-      receiverId: userId,
-      title,
-      message,
-      type: "user_welcome"
-    });
-  }
-
-  /**
-   * 獲取用戶群組
-   */
-  private static async getUserGroups(): Promise<{
-    workers: string[];
-    employers: string[];
-    admins: string[];
-  }> {
+  private static async getUserGroups(groups: { workers?: boolean; employers?: boolean; admins?: boolean }): Promise<string[]> {
     try {
-      const [workers, employers, admins] = await Promise.all([
-        dbClient.query.workers.findMany({ columns: { workerId: true } }),
-        dbClient.query.employers.findMany({ columns: { employerId: true } }),
-        dbClient.query.admins.findMany({ columns: { adminId: true } })
-      ]);
+      // 檢查是否有任何群組被指定
+      const hasGroups = groups.workers || groups.employers || groups.admins;
+      
+      if (!hasGroups) {
+        return [];
+      }
 
-      return {
-        workers: workers.map(w => w.workerId),
-        employers: employers.map(e => e.employerId),
-        admins: admins.map(a => a.adminId)
-      };
+      // 構建 UNIONALL 查詢
+      let unionQuery: any = undefined;
+
+      if (groups.workers) {
+        unionQuery = dbClient.select({
+          id: workers.workerId
+        }).from(workers);
+      }
+
+      if (groups.employers) {
+        const employerQuery = dbClient.select({
+          id: employers.employerId
+        }).from(employers);
+        
+        if (unionQuery) {
+          unionQuery = unionQuery.unionAll(employerQuery);
+        } else {
+          unionQuery = employerQuery;
+        }
+      }
+
+      if (groups.admins) {
+        const adminQuery = dbClient.select({
+          id: admins.adminId
+        }).from(admins);
+        
+        if (unionQuery) {
+          unionQuery = unionQuery.unionAll(adminQuery);
+        } else {
+          unionQuery = adminQuery;
+        }
+      }
+
+      const results = await unionQuery;
+      return results.map((result: { id: any; }) => result.id);
     } catch (error) {
       console.error("獲取用戶群組失敗:", error);
-      return { workers: [], employers: [], admins: [] };
+      return [];
     }
   }
 
@@ -284,51 +201,13 @@ class NotificationHelper {
    * 發送通知給指定用戶群組
    */
   static async notifyUserGroups(
-    userGroups: {
-      workers?: boolean;
-      employers?: boolean;
-      admins?: boolean;
-    },
+    groups: { workers?: boolean; employers?: boolean; admins?: boolean },
     title: string,
     message: string,
-    type: NotificationType = "system_announcement"
-  ): Promise<boolean> {
-    try {
-      const { workers, employers, admins } = await this.getUserGroups();
-      const targetUsers: string[] = [];
-
-      // 根據選擇的群組添加用戶ID
-      if (userGroups.workers) targetUsers.push(...workers);
-      if (userGroups.employers) targetUsers.push(...employers);
-      if (userGroups.admins) targetUsers.push(...admins);
-
-      if (targetUsers.length === 0) {
-        console.log("沒有找到符合條件的用戶");
-        return true;
-      }
-
-      // 批量發送通知
-      const success = await this.createBatchNotifications({
-        receiverIds: targetUsers,
-        title,
-        message,
-        type,
-      });
-
-      if (success) {
-        const groupNames = [];
-        if (userGroups.workers) groupNames.push(`${workers.length} 名打工者`);
-        if (userGroups.employers) groupNames.push(`${employers.length} 名商家`);
-        if (userGroups.admins) groupNames.push(`${admins.length} 名管理員`);
-        
-        console.log(`通知已發送給 ${groupNames.join("、")}`);
-      }
-
-      return success;
-    } catch (error) {
-      console.error("發送群組通知失敗:", error);
-      return false;
-    }
+    type: NotificationType
+  ) {
+    const targetUsers = await this.getUserGroups(groups);
+    return this.createBatch(targetUsers, { title, message, type });
   }
 }
 

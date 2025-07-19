@@ -14,6 +14,7 @@ import { uploadEnvironmentPhotos } from "../Middleware/uploadFile.ts";
 import { S3Client } from "bun";
 import moment from "moment";
 import { PresignedUrlCache } from "../Client/RedisClient.ts";
+import NotificationHelper from "../Utils/NotificationHelper.ts";
 
 const router = new Router();
 
@@ -145,7 +146,7 @@ async function formatEnvironmentPhotos(environmentPhotos: any) {
 
 					if (!presignedUrl) {
 						// 快取中沒有或即將過期，重新生成
-						presignedUrl = await client.presign(`environment-photos/${photo.filename}`, {
+						presignedUrl = client.presign(`environment-photos/${photo.filename}`, {
 							expiresIn: 3600 // 1 小時
 						});
 
@@ -318,6 +319,12 @@ router.post(
 
 			const newGig = insertedGig[0];
 
+			// 發送工作發佈成功通知
+			await NotificationHelper.notifyGigPublished(
+				user.employerId,
+				newGig.title
+			);
+
 			return response.status(201).send({
 				message: "工作發佈成功",
 				gig: {
@@ -358,7 +365,10 @@ router.get(
 			const currentDate = moment().format('YYYY-MM-DD');
 
 			// 建立基本查詢條件
-			const whereConditions = [eq(gigs.employerId, user.employerId)];
+			const whereConditions = [
+				eq(gigs.employerId, user.employerId),
+				eq(gigs.isActive, true),
+			];
 
 			// 根據狀態參數添加日期條件
 			if (status && ['not_started', 'ongoing', 'completed'].includes(status)) {
@@ -430,7 +440,11 @@ router.get(
 			// 如果沒有要求整合申請記錄，使用簡單查詢
 			if (application !== "true") {
 				const gig = await dbClient.query.gigs.findFirst({
-					where: and(eq(gigs.gigId, gigId), eq(gigs.employerId, user.employerId)),
+					where: and(
+						eq(gigs.gigId, gigId), 
+						eq(gigs.employerId, user.employerId),
+						eq(gigs.isActive, true)
+					),
 				});
 
 				if (!gig) {
@@ -448,7 +462,11 @@ router.get(
 
 			// 先查詢工作詳情
 			const gig = await dbClient.query.gigs.findFirst({
-				where: and(eq(gigs.gigId, gigId), eq(gigs.employerId, user.employerId)),
+				where: and(
+					eq(gigs.gigId, gigId), 
+					eq(gigs.employerId, user.employerId),
+					eq(gigs.isActive, true)
+				),
 			});
 
 			if (!gig) {
@@ -617,7 +635,7 @@ router.put(
 	},
 );
 
-// 停用/啟用工作
+// 停用/刪除工作
 router.patch(
 	"/:gigId/toggle-status",
 	authenticated,
@@ -632,11 +650,8 @@ router.patch(
 				where: and(eq(gigs.gigId, gigId), eq(gigs.employerId, user.employerId)),
 				with: {
 					gigApplications: {
-						where: or(
-							eq(gigApplications.status, "pending"),
-							eq(gigApplications.status, "approved")
-						),
-						limit: 1, // 只需要知道是否存在
+						where: eq(gigApplications.status, "approved"),
+						limit: 1, // 只需要知道是否存在已核准的申請
 					},
 				},
 			});
@@ -645,52 +660,41 @@ router.patch(
 				return response.status(404).send("工作不存在或無權限修改");
 			}
 
-			const today = moment().format("YYYY-MM-DD");
-			const hasActiveApplications = gigWithApplications.gigApplications.length > 0;
-
-			// 如果要停用工作，檢查限制條件
-			if (gigWithApplications.isActive) {
-				// 1. 檢查是否有申請中或已核准的申請
-				if (hasActiveApplications) {
-					return response.status(400).send({
-						message: "此工作有申請中或已核准的申請者，無法停用",
-					});
-				}
-
-				// 2. 檢查工作是否已下架
-				const isListed = !gigWithApplications.unlistedAt || gigWithApplications.unlistedAt >= today;
-				if (isListed) {
-					return response.status(400).send({
-						message: "請先下架工作再進行停用",
-					});
-				}
-			}
-
-			// 如果要啟用工作，檢查合理性限制
+			// 如果工作已經停用，不允許操作
 			if (!gigWithApplications.isActive) {
-				// 檢查工作是否已過期
-				if (gigWithApplications.dateEnd && gigWithApplications.dateEnd < today) {
-					return response.status(400).send({
-						message: "工作已過期，無法啟用",
-					});
-				}
+				return response.status(400).send({
+					message: "工作已經停用，無法再次操作",
+				});
 			}
 
-			const newIsActive = !gigWithApplications.isActive;
+			const hasApprovedApplications = gigWithApplications.gigApplications.length > 0;
 
-			await dbClient
-				.update(gigs)
-				.set({
-					isActive: newIsActive,
-					updatedAt: new Date(),
-				})
-				.where(eq(gigs.gigId, gigId));
+			// 根據是否有已核准的申請者決定操作
+			if (hasApprovedApplications) {
+				// 有已核准的申請者，停用工作
+				await dbClient
+					.update(gigs)
+					.set({
+						isActive: false,
+						updatedAt: new Date(),
+					})
+					.where(eq(gigs.gigId, gigId));
 
-			return response.status(200).send({
-				message: `工作已${newIsActive ? "啟用" : "停用"}`,
-			});
+				return response.status(200).send({
+					message: "工作已停用",
+					action: "disabled",
+				});
+			} else {
+				// 沒有已核准的申請者，直接刪除工作
+				await dbClient.delete(gigs).where(eq(gigs.gigId, gigId));
+
+				return response.status(200).send({
+					message: "工作已刪除",
+					action: "deleted",
+				});
+			}
 		} catch (error) {
-			console.error("切換工作狀態時出錯:", error);
+			console.error("處理工作停用/刪除時出錯:", error);
 			return response.status(500).send("伺服器內部錯誤");
 		}
 	},
@@ -745,53 +749,6 @@ router.patch(
 			});
 		} catch (error) {
 			console.error("切換工作上架狀態時出錯:", error);
-			return response.status(500).send("伺服器內部錯誤");
-		}
-	},
-);
-
-// 刪除工作
-router.delete(
-	"/:gigId",
-	authenticated,
-	requireEmployer,
-	requireApprovedEmployer,
-	async ({ user, params, response }) => {
-		try {
-			const { gigId } = params;
-
-			const existingGig = await dbClient.query.gigs.findFirst({
-				where: and(eq(gigs.gigId, gigId), eq(gigs.employerId, user.employerId)),
-			});
-
-			if (!existingGig) {
-				return response.status(404).send("工作不存在或無權限刪除");
-			}
-
-			// 檢查工作必須先被停用
-			if (existingGig.isActive) {
-				return response.status(400).send("請先停用工作再進行刪除");
-			}
-
-			// 檢查是否有已核准的申請
-			const approvedApplications = await dbClient.query.gigApplications.findFirst({
-				where: and(
-					eq(gigApplications.gigId, gigId),
-					eq(gigApplications.status, "approved")
-				),
-			});
-
-			if (approvedApplications) {
-				return response.status(400).send("此工作有已核准的申請者，無法刪除");
-			}
-
-			await dbClient.delete(gigs).where(eq(gigs.gigId, gigId));
-
-			return response.status(200).send({
-				message: "工作刪除成功",
-			});
-		} catch (error) {
-			console.error("刪除工作時出錯:", error);
 			return response.status(500).send("伺服器內部錯誤");
 		}
 	},

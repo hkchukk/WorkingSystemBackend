@@ -39,7 +39,7 @@ export class CronManager {
       return false;
     }
   }
-
+  
   /**
    * 檢查特定的 cron 任務是否存在
    */
@@ -57,7 +57,6 @@ export class CronManager {
 
   /**
    * 創建自動下架工作的 cron 任務
-   * 每天台北時間 23:00 執行，檢查並下架明天到期的工作
    */
   static async createAutoUnlistJob(): Promise<boolean> {
     const jobName = "auto_unlist_expired_gigs";
@@ -73,19 +72,34 @@ export class CronManager {
       // Cron 表達式: 每天 15:00 UTC (等於台北時間 23:00)
       const schedule = "0 15 * * *";
 
-      // SQL 查詢，使用 'Asia/Taipei' 時區進行日期計算
+      // SQL 查詢，一次性處理所有過期工作和通知
       const command = `
         DO $$
         DECLARE
           taipei_today DATE := (NOW() AT TIME ZONE 'Asia/Taipei')::DATE;
         BEGIN
+          -- 先批量插入過期通知
+          INSERT INTO notifications (notification_id, receiver_id, title, message, type, created_at)
+          SELECT 
+            substr(translate(encode(gen_random_bytes(16), 'base64'), '/+', '_-'), 1, 21),
+            g.employer_id,
+            '工作已過期',
+            '您的工作「' || g.title || '」已到期下架。',
+            'gig_expired',
+            NOW()
+          FROM gigs g
+          WHERE g.date_end = taipei_today 
+          AND g.is_active = true;
+
+          -- 然後批量更新工作狀態
           UPDATE gigs 
           SET 
             "unlisted_at" = taipei_today,
             "is_active" = false,
             "updated_at" = NOW()
           WHERE 
-            "date_end" = taipei_today;
+            "date_end" = taipei_today
+            AND "is_active" = true;
         END;
         $$;
       `;
@@ -100,7 +114,7 @@ export class CronManager {
 
       console.log(`✅ 已創建自動下架工作的 cron 任務: ${jobName}`);
       console.log(`📅 執行時間: 每天台北時間 23:00 (UTC 15:00)`);
-      console.log("🎯 功能: 自動下架和停用明天到期的工作");
+      console.log("🎯 功能: 批量處理過期工作，發送通知並更新狀態");
       return true;
     } catch (error) {
       console.error(`❌ 創建 cron 任務 ${jobName} 失敗:`, error);

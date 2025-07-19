@@ -10,6 +10,7 @@ import { adminRegister } from "../Middleware/validator";
 import { hash } from "@node-rs/argon2";
 import { argon2Config } from "../config";
 import { emailClient } from "../Client/EmailClient";
+import NotificationHelper from "../Utils/NotificationHelper.ts";
 
 const router = new Router();
 
@@ -50,6 +51,13 @@ router.patch(
 			.set({ approvalStatus: "approved" })
 			.where(eq(employers.employerId, id))
 			.returning();
+
+		// 發送審核通過通知
+		await NotificationHelper.notifyAccountApproved(
+			employerFound.employerId,
+			employerFound.employerName
+		);
+
 		// TODO: Fill in email details
 		await emailClient.sendMail({
 			from: "",

@@ -9,6 +9,7 @@ import { employers, workers } from "../Schema/DatabaseSchema.ts";
 import { argon2Config } from "../config.ts";
 import { hash as argon2hash } from "@node-rs/argon2";
 import validate from "@nhttp/zod";
+import NotificationHelper from "../Utils/NotificationHelper.ts";
 import {
   employerSignupSchema,
   workerSignupSchema,
@@ -146,6 +147,13 @@ router.post(
 
     const newUser = insertedUsers[0];
 
+    // 發送歡迎通知給新註冊的打工者
+    await NotificationHelper.notifyUserWelcome(
+      newUser.workerId,
+      newUser.firstName,
+      "worker"
+    );
+
     return response.status(201).send({
       message: "User registered successfully:",
       user: {
@@ -250,7 +258,14 @@ router.post(
           })
           .returning();
 
-        const newUser = body;
+        const newUser = insertedUsers[0];
+
+        // 發送歡迎通知給新註冊的商家
+        await NotificationHelper.notifyUserWelcome(
+          newUser.employerId,
+          newUser.employerName,
+          "employer"
+        );
 
         return response.status(201).send({
           message: "User registered successfully:",

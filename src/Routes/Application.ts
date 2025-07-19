@@ -11,11 +11,12 @@ import { eq, and, desc, or, lte, sql, gte } from "drizzle-orm";
 import {
   gigs,
   gigApplications,
-  employers
+  employers,
 } from "../Schema/DatabaseSchema.ts";
 import validate from "@nhttp/zod";
 import { reviewApplicationSchema } from "../Middleware/validator.ts";
 import moment from "moment";
+import NotificationHelper from "../Utils/NotificationHelper.ts";
 
 const router = new Router();
 
@@ -75,6 +76,13 @@ router.post(
           status: "pending",
         })
         .returning();
+
+      // 發送通知給商家
+      await NotificationHelper.notifyApplicationReceived(
+        gig.employerId,
+        `${user.firstName} ${user.lastName}`,
+        gig.title
+      );
 
       return response.status(201).send({
         message: "申請提交成功，等待商家審核",
@@ -479,13 +487,29 @@ router.put(
       }
 
       // 更新申請狀態
-      const updatedApplication = await dbClient
+      await dbClient
         .update(gigApplications)
         .set({
           status: status,
           updatedAt: new Date(),
         })
         .where(eq(gigApplications.applicationId, applicationId));
+
+      // 發送通知給打工者
+      if (status === "approved") {
+        await NotificationHelper.notifyApplicationApproved(
+          application.workerId,
+          application.gig.title,
+          user.employerName
+        );
+      } else if (status === "rejected") {
+        await NotificationHelper.notifyApplicationRejected(
+          application.workerId,
+          application.gig.title,
+          user.employerName,
+          body.reason // 如果有拒絕原因的話
+        );
+      }
 
       const statusText = status === "approved" ? "核准" : "拒絕";
 

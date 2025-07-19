@@ -240,6 +240,30 @@ export const employerRatings = pgTable("employer_ratings", {
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
+// ========== 7. 系統通知（Notifications） ==========
+export const notifications = pgTable("notifications", {
+  notificationId: varchar("notification_id", { length: 21 })
+    .$defaultFn(() => nanoid())
+    .primaryKey(),
+
+  // 接收者資訊
+  receiverId: varchar("receiver_id", { length: 21 }).notNull(),
+
+  // 通知內容
+  title: varchar("title", { length: 256 }).notNull(),
+  message: text("message").notNull(),
+
+  // 通知類型
+  type: varchar("type", { length: 128 }).notNull(),
+
+  // 通知狀態
+  isRead: boolean("is_read").default(false).notNull(),
+  readAt: timestamp("read_at"),
+
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
 // ==============================================
 //               關聯定義 (Relations)
 // ==============================================

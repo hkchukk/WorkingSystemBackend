@@ -14,6 +14,7 @@ import { uploadEnvironmentPhotos } from "../Middleware/uploadFile.ts";
 import { S3Client } from "bun";
 import moment from "moment";
 import { PresignedUrlCache } from "../Client/RedisClient.ts";
+import NotificationHelper from "../Utils/NotificationHelper.ts";
 
 const router = new Router();
 
@@ -27,7 +28,7 @@ const client = new S3Client({
 });
 
 // 統一的照片上傳處理函數
-const handlePhotoUpload = async (reqFile: any, existingPhotos: any[] = []) => {
+async function handlePhotoUpload(reqFile: any, existingPhotos: any[] = []) {
 	// 如果沒有上傳檔案，返回現有照片
 	if (!reqFile?.environmentPhotos) {
 		return {
@@ -110,7 +111,7 @@ const handlePhotoUpload = async (reqFile: any, existingPhotos: any[] = []) => {
 };
 
 // 清理臨時文件
-const cleanupTempFiles = async (uploadedFiles: any[]) => {
+async function cleanupTempFiles(uploadedFiles: any[]) {
 	if (uploadedFiles.length === 0) return;
 
 	Promise.all(
@@ -129,30 +130,30 @@ const cleanupTempFiles = async (uploadedFiles: any[]) => {
 };
 
 // 處理環境照片數據格式的輔助函數（帶 Redis 快取）
-const formatEnvironmentPhotos = async (environmentPhotos: any) => {
+async function formatEnvironmentPhotos(environmentPhotos: any) {
 	if (!environmentPhotos) return null;
 
 	if (Array.isArray(environmentPhotos)) {
 		// 確保數據庫中最多只有 3 張照片
 		const limitedPhotos = environmentPhotos.slice(0, 3);
-		
+
 		// 使用 Redis 快取策略生成 presigned URLs
 		const photosWithUrls = await Promise.all(
 			limitedPhotos.map(async (photo: any) => {
 				try {
 					// 首先檢查 Redis 快取
 					let presignedUrl = await PresignedUrlCache.get(photo.filename);
-					
+
 					if (!presignedUrl) {
 						// 快取中沒有或即將過期，重新生成
-						presignedUrl = await client.presign(`environment-photos/${photo.filename}`, {
+						presignedUrl = client.presign(`environment-photos/${photo.filename}`, {
 							expiresIn: 3600 // 1 小時
 						});
-						
+
 						// 存入快取
 						await PresignedUrlCache.set(photo.filename, presignedUrl, 3600);
 					}
-					
+
 					return {
 						originalName: photo.originalName,
 						type: photo.type,
@@ -180,7 +181,7 @@ const formatEnvironmentPhotos = async (environmentPhotos: any) => {
 };
 
 // 構建工作數據物件
-const buildGigData = (body: any, user: any, environmentPhotosInfo: any) => {
+function buildGigData(body: any, user: any, environmentPhotosInfo: any) {
 	const {
 		title,
 		description,
@@ -248,7 +249,7 @@ router.delete("/deleteFile/:filename", authenticated, requireEmployer, async ({ 
 				environmentPhotos: true,
 			},
 		});
-		
+
 		const hasExactMatch = targetGig &&
 			Array.isArray(targetGig.environmentPhotos) &&
 			targetGig.environmentPhotos.some((photo: any) => photo.filename === filename);
@@ -259,12 +260,12 @@ router.delete("/deleteFile/:filename", authenticated, requireEmployer, async ({ 
 				message: `沒有找到文件 ${filename}`,
 			});
 		}
-		
+
 		// 更新照片陣列
-		const updatedPhotos = Array.isArray(targetGig.environmentPhotos) 
-		? targetGig.environmentPhotos.filter((photo: any) => photo.filename !== filename)
-		: [];
-		
+		const updatedPhotos = Array.isArray(targetGig.environmentPhotos)
+			? targetGig.environmentPhotos.filter((photo: any) => photo.filename !== filename)
+			: [];
+
 		// 更新資料庫
 		await dbClient
 			.update(gigs)
@@ -273,13 +274,13 @@ router.delete("/deleteFile/:filename", authenticated, requireEmployer, async ({ 
 				updatedAt: new Date(),
 			})
 			.where(eq(gigs.gigId, targetGig.gigId));
-		
+
 		// 刪除 S3 文件
 		await client.delete(`environment-photos/${filename}`);
-		
+
 		// 清除 Redis 快取
 		await PresignedUrlCache.delete(filename);
-		
+
 		return response.status(200).send({
 			message: `文件 ${filename} 刪除成功`,
 		});
@@ -317,6 +318,12 @@ router.post(
 				.returning();
 
 			const newGig = insertedGig[0];
+
+			// 發送工作發佈成功通知
+			await NotificationHelper.notifyGigPublished(
+				user.employerId,
+				newGig.title
+			);
 
 			return response.status(201).send({
 				message: "工作發佈成功",
@@ -358,7 +365,10 @@ router.get(
 			const currentDate = moment().format('YYYY-MM-DD');
 
 			// 建立基本查詢條件
-			const whereConditions = [eq(gigs.employerId, user.employerId)];
+			const whereConditions = [
+				eq(gigs.employerId, user.employerId),
+				eq(gigs.isActive, true),
+			];
 
 			// 根據狀態參數添加日期條件
 			if (status && ['not_started', 'ongoing', 'completed'].includes(status)) {
@@ -430,7 +440,11 @@ router.get(
 			// 如果沒有要求整合申請記錄，使用簡單查詢
 			if (application !== "true") {
 				const gig = await dbClient.query.gigs.findFirst({
-					where: and(eq(gigs.gigId, gigId), eq(gigs.employerId, user.employerId)),
+					where: and(
+						eq(gigs.gigId, gigId), 
+						eq(gigs.employerId, user.employerId),
+						eq(gigs.isActive, true)
+					),
 				});
 
 				if (!gig) {
@@ -448,7 +462,11 @@ router.get(
 
 			// 先查詢工作詳情
 			const gig = await dbClient.query.gigs.findFirst({
-				where: and(eq(gigs.gigId, gigId), eq(gigs.employerId, user.employerId)),
+				where: and(
+					eq(gigs.gigId, gigId), 
+					eq(gigs.employerId, user.employerId),
+					eq(gigs.isActive, true)
+				),
 			});
 
 			if (!gig) {
@@ -596,9 +614,9 @@ router.put(
 				message: responseMessage,
 				photoInfo: hasPhotoOperation
 					? {
-							totalPhotos: totalCount,
-							addedPhotos: addedCount,
-						}
+						totalPhotos: totalCount,
+						addedPhotos: addedCount,
+					}
 					: undefined,
 			});
 		} catch (error) {
@@ -617,7 +635,7 @@ router.put(
 	},
 );
 
-// 停用/啟用工作
+// 停用/刪除工作
 router.patch(
 	"/:gigId/toggle-status",
 	authenticated,
@@ -632,11 +650,8 @@ router.patch(
 				where: and(eq(gigs.gigId, gigId), eq(gigs.employerId, user.employerId)),
 				with: {
 					gigApplications: {
-						where: or(
-							eq(gigApplications.status, "pending"),
-							eq(gigApplications.status, "approved")
-						),
-						limit: 1, // 只需要知道是否存在
+						where: eq(gigApplications.status, "approved"),
+						limit: 1, // 只需要知道是否存在已核准的申請
 					},
 				},
 			});
@@ -645,52 +660,41 @@ router.patch(
 				return response.status(404).send("工作不存在或無權限修改");
 			}
 
-			const today = moment().format("YYYY-MM-DD");
-			const hasActiveApplications = gigWithApplications.gigApplications.length > 0;
-
-			// 如果要停用工作，檢查限制條件
-			if (gigWithApplications.isActive) {
-				// 1. 檢查是否有申請中或已核准的申請
-				if (hasActiveApplications) {
-					return response.status(400).send({
-						message: "此工作有申請中或已核准的申請者，無法停用",
-					});
-				}
-
-				// 2. 檢查工作是否已下架
-				const isListed = !gigWithApplications.unlistedAt || gigWithApplications.unlistedAt >= today;
-				if (isListed) {
-					return response.status(400).send({
-						message: "請先下架工作再進行停用",
-					});
-				}
-			}
-
-			// 如果要啟用工作，檢查合理性限制
+			// 如果工作已經停用，不允許操作
 			if (!gigWithApplications.isActive) {
-				// 檢查工作是否已過期
-				if (gigWithApplications.dateEnd && gigWithApplications.dateEnd < today) {
-					return response.status(400).send({
-						message: "工作已過期，無法啟用",
-					});
-				}
+				return response.status(400).send({
+					message: "工作已經停用，無法再次操作",
+				});
 			}
 
-			const newIsActive = !gigWithApplications.isActive;
+			const hasApprovedApplications = gigWithApplications.gigApplications.length > 0;
 
-			await dbClient
-				.update(gigs)
-				.set({
-					isActive: newIsActive,
-					updatedAt: new Date(),
-				})
-				.where(eq(gigs.gigId, gigId));
+			// 根據是否有已核准的申請者決定操作
+			if (hasApprovedApplications) {
+				// 有已核准的申請者，停用工作
+				await dbClient
+					.update(gigs)
+					.set({
+						isActive: false,
+						updatedAt: new Date(),
+					})
+					.where(eq(gigs.gigId, gigId));
 
-			return response.status(200).send({
-				message: `工作已${newIsActive ? "啟用" : "停用"}`,
-			});
+				return response.status(200).send({
+					message: "工作已停用",
+					action: "disabled",
+				});
+			} else {
+				// 沒有已核准的申請者，直接刪除工作
+				await dbClient.delete(gigs).where(eq(gigs.gigId, gigId));
+
+				return response.status(200).send({
+					message: "工作已刪除",
+					action: "deleted",
+				});
+			}
 		} catch (error) {
-			console.error("切換工作狀態時出錯:", error);
+			console.error("處理工作停用/刪除時出錯:", error);
 			return response.status(500).send("伺服器內部錯誤");
 		}
 	},
@@ -750,74 +754,27 @@ router.patch(
 	},
 );
 
-// 刪除工作
-router.delete(
-	"/:gigId",
-	authenticated,
-	requireEmployer,
-	requireApprovedEmployer,
-	async ({ user, params, response }) => {
-		try {
-			const { gigId } = params;
-
-			const existingGig = await dbClient.query.gigs.findFirst({
-				where: and(eq(gigs.gigId, gigId), eq(gigs.employerId, user.employerId)),
-			});
-
-			if (!existingGig) {
-				return response.status(404).send("工作不存在或無權限刪除");
-			}
-
-			// 檢查工作必須先被停用
-			if (existingGig.isActive) {
-				return response.status(400).send("請先停用工作再進行刪除");
-			}
-
-			// 檢查是否有已核准的申請
-			const approvedApplications = await dbClient.query.gigApplications.findFirst({
-				where: and(
-					eq(gigApplications.gigId, gigId),
-					eq(gigApplications.status, "approved")
-				),
-			});
-
-			if (approvedApplications) {
-				return response.status(400).send("此工作有已核准的申請者，無法刪除");
-			}
-
-			await dbClient.delete(gigs).where(eq(gigs.gigId, gigId));
-
-			return response.status(200).send({
-				message: "工作刪除成功",
-			});
-		} catch (error) {
-			console.error("刪除工作時出錯:", error);
-			return response.status(500).send("伺服器內部錯誤");
-		}
-	},
-);
-
 // 獲取所有可用工作
 router.get("/public/", async ({ query, response }) => {
 	try {
-		const { 
-			limit = 10, 
-			offset = 0, 
-			city, 
-			district, 
-			minRate, 
+		const {
+			limit = 10,
+			offset = 0,
+			city,
+			district,
+			minRate,
 			maxRate,
 			dateStart,
-			dateEnd 
+			dateEnd
 		} = query;
-		
+
 		// 驗證 city 和 district 必須成對
 		if (district && !city) {
 			return response.status(400).send({
 				error: "提供區域時必須同時提供城市"
 			});
 		}
-		
+
 		const requestLimit = Number.parseInt(limit);
 		const requestOffset = Number.parseInt(offset);
 		const minRateFilter = minRate ? Number.parseInt(minRate) : null;
@@ -834,7 +791,7 @@ router.get("/public/", async ({ query, response }) => {
 			sql`(${gigs.unlistedAt} IS NULL OR ${gigs.unlistedAt} >= ${today})`,
 			gte(gigs.dateStart, searchDateStart),
 		];
-		
+
 		dateEnd ? whereConditions.push(lte(gigs.dateEnd, dateEnd)) : null;
 		city ? whereConditions.push(eq(gigs.city, city)) : null;
 		district ? whereConditions.push(eq(gigs.district, district)) : null;
@@ -940,23 +897,23 @@ router.get("/public/:gigId/", async ({ params, response }) => {
 // Employer 行事曆 - 查看已排定的工作
 router.get("/employer/calendar", authenticated, requireEmployer, requireApprovedEmployer, async ({ user, query, response }) => {
 	try {
-		const { 
-			year, 
-			month, 
-			dateStart, 
-			dateEnd 
+		const {
+			year,
+			month,
+			dateStart,
+			dateEnd
 		} = query;
-		
+
 		// 檢查是否提供了必要的日期參數
 		const hasYearMonth = year && month;
 		const hasDateRange = dateStart || dateEnd;
-		
+
 		if (!hasYearMonth && !hasDateRange) {
 			return response.status(400).send({
 				error: "必須提供年月參數 (year, month) 或日期範圍參數 (dateStart, dateEnd)"
 			});
 		}
-		
+
 		const currentDate = moment().format('YYYY-MM-DD');
 		const whereConditions = [
 			eq(gigs.employerId, user.employerId),
@@ -964,24 +921,24 @@ router.get("/employer/calendar", authenticated, requireEmployer, requireApproved
 			lte(gigs.publishedAt, currentDate),
 			sql`(${gigs.unlistedAt} IS NULL OR ${gigs.unlistedAt} >= ${currentDate})`
 		];
-		
+
 		// 處理日期查詢邏輯
 		if (hasYearMonth) {
 			// 月份查詢模式
 			const yearNum = Number.parseInt(year);
 			const monthNum = Number.parseInt(month);
-			
+
 			// 驗證年月範圍
 			if (yearNum < 2020 || yearNum > 2050 || monthNum < 1 || monthNum > 12) {
 				return response.status(400).send({
 					error: "年份必須在 2020-2050 之間，月份必須在 1-12 之間"
 				});
 			}
-			
+
 			// 建立該月份的開始和結束日期
 			const startDate = moment(`${yearNum}-${monthNum.toString().padStart(2, '0')}-01`).format('YYYY-MM-DD');
 			const endDate = moment(startDate).endOf('month').format('YYYY-MM-DD');
-			
+
 			// 查詢工作期間與該月有重疊的工作
 			whereConditions.push(
 				and(
@@ -994,7 +951,7 @@ router.get("/employer/calendar", authenticated, requireEmployer, requireApproved
 			dateStart ? whereConditions.push(gte(gigs.dateStart, dateStart)) : null;
 			dateEnd ? whereConditions.push(lte(gigs.dateEnd, dateEnd)) : null;
 		}
-		
+
 		const calendarGigs = await dbClient.query.gigs.findMany({
 			where: and(...whereConditions),
 			orderBy: [gigs.dateStart, gigs.timeStart],
@@ -1007,7 +964,7 @@ router.get("/employer/calendar", authenticated, requireEmployer, requireApproved
 				timeEnd: true,
 			},
 		});
-		
+
 		return response.status(200).send({
 			gigs: calendarGigs,
 			count: calendarGigs.length,
@@ -1018,7 +975,7 @@ router.get("/employer/calendar", authenticated, requireEmployer, requireApproved
 				dateEnd: dateEnd || null,
 			}
 		});
-		
+
 	} catch (error) {
 		console.error("獲取 Employer 行事曆時出錯:", error);
 		return response.status(500).send("伺服器內部錯誤");

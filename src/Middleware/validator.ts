@@ -352,6 +352,18 @@ export const reviewApplicationSchema = z.object({
   }),
 });
 
+// 通知相關 Schema
+export const createNotificationSchema = z.object({
+  receiverId: z.string().min(1, "接收者ID不能為空"),
+  title: z.string().min(1, "標題不能為空").max(256, "標題過長"),
+  message: z.string().min(1, "訊息不能為空"),
+  type: z.string().min(1, "通知類型不能為空"),
+});
+
+export const markAsReadSchema = z.object({
+  notificationIds: z.array(z.string()).min(1, "至少需要一個通知ID"),
+});
+
 export const adminRegister = z.object({
   email: z.string().email("Invalid email format"),
   password: z.string().min(8, "Password must be at least 8 characters")

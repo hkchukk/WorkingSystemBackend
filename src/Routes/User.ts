@@ -9,6 +9,7 @@ import { employers, workers } from "../Schema/DatabaseSchema.ts";
 import { argon2Config } from "../config.ts";
 import { hash as argon2hash } from "@node-rs/argon2";
 import validate from "@nhttp/zod";
+import NotificationHelper from "../Utils/NotificationHelper.ts";
 import {
   employerSignupSchema,
   workerSignupSchema,
@@ -18,6 +19,7 @@ import {
 import { uploadDocument, uploadProfilePhoto } from "../Middleware/uploadFile.ts";
 import { file, S3Client, S3File } from "bun";
 import { PresignedUrlCache } from "../Client/RedisClient.ts";
+import { Role } from "../Types/types.ts";
 
 const s3Client = new S3Client({
   region: "auto",
@@ -30,7 +32,7 @@ const s3Client = new S3Client({
 
 const R2_BUCKET_NAME = "backend-files";
 
-async function generatePresignedUrl(filePath: string, expiresIn: number = 3600): Promise<string | null> {
+async function generatePresignedUrl(filePath: string, expiresIn = 3600): Promise<string | null> {
   if (!filePath) {
     console.warn("generatePresignedUrl called with empty filePath");
     return null;
@@ -53,18 +55,18 @@ async function generatePresignedUrl(filePath: string, expiresIn: number = 3600):
   try {
     // documentation and updated if necessary.
     // The exact structure of the returned value (string or object with a URL property)
-    const signedRequestResult = await (s3Client as any).presign( filePath,{
-        expires: expiresIn, 
+    const signedRequestResult = await (s3Client as any).presign(filePath, {
+      expires: expiresIn,
     });
 
     // Adjust if 'signedRequestResult' is an object (e.g., signedRequestResult.url)
     const finalUrl = typeof signedRequestResult === 'object' && signedRequestResult.url ? signedRequestResult.url : signedRequestResult;
 
     if (!finalUrl) {
-        console.error(`Failed to generate presigned URL for ${filePath}. Method might be incorrect or returned null/undefined.`);
-        return null;
+      console.error(`Failed to generate presigned URL for ${filePath}. Method might be incorrect or returned null/undefined.`);
+      return null;
     }
-    
+
     await PresignedUrlCache.set(cacheKey, finalUrl, expiresIn);
     console.log(`Successfully generated and cached presigned URL for ${filePath}`);
     return finalUrl;
@@ -80,7 +82,7 @@ const router = new Router();
 // 清理臨時文件
 const cleanupTempFiles = async (uploadedFiles: any[]) => {
   if (uploadedFiles.length === 0) return;
-  
+
   Promise.all(
     uploadedFiles.map(async (file) => {
       try {
@@ -145,6 +147,13 @@ router.post(
 
     const newUser = insertedUsers[0];
 
+    // 發送歡迎通知給新註冊的打工者
+    await NotificationHelper.notifyUserWelcome(
+      newUser.workerId,
+      newUser.firstName,
+      "worker"
+    );
+
     return response.status(201).send({
       message: "User registered successfully:",
       user: {
@@ -162,13 +171,13 @@ router.post(
   uploadDocument,
   validate(employerSignupSchema),
   async ({ headers, body, file: reqFile, response }) => {
-    
-    var files = null;
-    if(body.identificationType == "businessNo" && reqFile.verficationDocument) {
-      files = reqFile.verficationDocument.length == undefined ? [reqFile.verficationDocument] : reqFile.verficationDocument;
-    }else if(body.identificationType == "personalId" && reqFile.identificationDocument) {
-      files = reqFile.identificationDocument.length == undefined ? [reqFile.identificationDocument] : reqFile.identificationDocument;
-    }else{
+
+    let files = null;
+    if (body.identificationType === "businessNo" && reqFile.verficationDocument) {
+      files = reqFile.verficationDocument.length === undefined ? [reqFile.verficationDocument] : reqFile.verficationDocument;
+    } else if (body.identificationType === "personalId" && reqFile.identificationDocument) {
+      files = reqFile.identificationDocument.length === undefined ? [reqFile.identificationDocument] : reqFile.identificationDocument;
+    } else {
       return response.status(400).send("Invalid identification document");
     }
 
@@ -231,7 +240,7 @@ router.post(
           ),
         );
 
-          const insertedUsers = await dbClient
+        const insertedUsers = await dbClient
           .insert(employers)
           .values({
             email,
@@ -249,7 +258,14 @@ router.post(
           })
           .returning();
 
-        const newUser = body;
+        const newUser = insertedUsers[0];
+
+        // 發送歡迎通知給新註冊的商家
+        await NotificationHelper.notifyUserWelcome(
+          newUser.employerId,
+          newUser.employerName,
+          "employer"
+        );
 
         return response.status(201).send({
           message: "User registered successfully:",
@@ -288,11 +304,11 @@ router.get("/logout", ({ response, session }) => {
 });
 
 router.get("/profile", authenticated, async ({ user, response }) => {
-  if (user.role === "worker") {
+  if (user.role === Role.WORKER) {
     const { password, profilePhoto, ...workerData } = user;
     let photoUrlData = null;
 
-    if (profilePhoto && profilePhoto.r2Name) {
+    if (profilePhoto?.r2Name) {
       const url = await generatePresignedUrl(`profile-photos/workers/${profilePhoto.r2Name}`);
       if (url) {
         photoUrlData = {
@@ -301,18 +317,18 @@ router.get("/profile", authenticated, async ({ user, response }) => {
           type: profilePhoto.type,
         };
       } else {
-         // Keep photoUrlData as null if URL generation fails
+        // Keep photoUrlData as null if URL generation fails
         console.warn(`Failed to generate presigned URL for worker ${user.workerId} photo ${profilePhoto.r2Name}`);
       }
     }
     return { ...workerData, profilePhoto: photoUrlData };
   }
 
-  if (user.role === "employer") {
+  if (user.role === Role.EMPLOYER) {
     const { password, employerPhoto, verificationDocuments, ...employerData } = user; // Exclude verificationDocuments for now
     let photoUrlData = null;
 
-    if (employerPhoto && employerPhoto.r2Name) {
+    if (employerPhoto?.r2Name) {
       const url = await generatePresignedUrl(`profile-photos/employers/${employerPhoto.r2Name}`);
       if (url) {
         photoUrlData = {
@@ -334,16 +350,16 @@ router.get("/profile", authenticated, async ({ user, response }) => {
 
 router.put("/update/profile", authenticated, async ({ body, response, request, user }) => {
   try {
-    if (user.role === "worker") {
+    if (user.role === Role.WORKER) {
       const validationResult = updateWorkerProfileSchema.safeParse(body);
 
       if (!validationResult.success) {
         return response
           .status(400)
           .json({
-          message: "Validation failed",
-          errors: validationResult.error.flatten(),
-        });
+            message: "Validation failed",
+            errors: validationResult.error.flatten(),
+          });
       }
 
       const validatedData = validationResult.data;
@@ -357,7 +373,8 @@ router.put("/update/profile", authenticated, async ({ body, response, request, u
       const { password, ...workerData } = updatedWorker[0];
       return response.status(200).json(workerData);
 
-    } else if (user.role === "employer") {
+    }
+    if (user.role === Role.EMPLOYER) {
       const validationResult = updateEmployerProfileSchema.safeParse(body);
 
       if (!validationResult.success) {
@@ -367,7 +384,7 @@ router.put("/update/profile", authenticated, async ({ body, response, request, u
         });
       }
 
-      const validatedData  = validationResult.data;
+      const validatedData = validationResult.data;
 
       const updatedEmployer = await dbClient
         .update(employers)
@@ -382,9 +399,8 @@ router.put("/update/profile", authenticated, async ({ body, response, request, u
       const { password: empPassword, ...employerData } = updatedEmployer[0];
       return response.status(200).json(employerData);
 
-    } else {
-      return response.status(400).send("Invalid user role for profile update");
     }
+    return response.status(400).send("Invalid user role for profile update");
   } catch (error) {
     console.error("Error updating profile:", error);
     return response.status(500).send("Internal server error");
@@ -392,25 +408,25 @@ router.put("/update/profile", authenticated, async ({ body, response, request, u
 });
 
 router.put(
-  "/update/identification", 
+  "/update/identification",
   authenticated,
-  uploadDocument, 
-  async({ headers, body, file: reqFile, response, user }) => {
+  uploadDocument,
+  async ({ headers, body, file: reqFile, response, user }) => {
     let files = null;
     try {
-      if (reqFile.length == 0) {
+      if (reqFile.length === 0) {
         return response.status(400).send("No file uploaded");
       }
 
-      if(body.identificationType == "businessNo" && reqFile.verficationDocument) {
-        files = reqFile.verficationDocument.length == undefined ? [reqFile.verficationDocument] : reqFile.verficationDocument;
-      }else if(body.identificationType == "personalId" && reqFile.identificationDocument) {
-        files = reqFile.identificationDocument.length == undefined ? [reqFile.identificationDocument] : reqFile.identificationDocument;
-      }else{
+      if (body.identificationType === "businessNo" && reqFile.verficationDocument) {
+        files = reqFile.verficationDocument.length === undefined ? [reqFile.verficationDocument] : reqFile.verficationDocument;
+      } else if (body.identificationType === "personalId" && reqFile.identificationDocument) {
+        files = reqFile.identificationDocument.length === undefined ? [reqFile.identificationDocument] : reqFile.identificationDocument;
+      } else {
         return response.status(400).send("Invalid identification document");
       }
 
-      if( user.role == "employer" && headers.get("platform") === "web-employer" ) {
+      if (user.role === Role.EMPLOYER && headers.get("platform") === "web-employer") {
         const filesInfo: {
           originalName: string;
           type: string;
@@ -422,7 +438,7 @@ router.put(
         }));
 
         const deleteFiles = JSON.parse(user.verificationDocuments).map(
-          (file: { r2Name: string }) => 
+          (file: { r2Name: string }) =>
             s3Client.delete(`documents/${body.identificationType}/${file.r2Name}`)
         );
 
@@ -477,17 +493,17 @@ router.put(
       }
 
       const filesInfo: {
-          originalName: string;
-          type: string;
-          r2Name: string;
-        } = {
-          originalName: reqFile.profilePhoto.name,
-          type: reqFile.profilePhoto.type,
-          r2Name: reqFile.profilePhoto.filename,
-        }
+        originalName: string;
+        type: string;
+        r2Name: string;
+      } = {
+        originalName: reqFile.profilePhoto.name,
+        type: reqFile.profilePhoto.type,
+        r2Name: reqFile.profilePhoto.filename,
+      }
 
       if (user.role === "worker" && headers.get("platform") === "mobile") {
-        if( user.profilePhoto && user.profilePhoto.r2Name ){ 
+        if (user.profilePhoto?.r2Name) {
           await s3Client.delete(`profile-photos/workers/${user.profilePhoto.r2Name}`);
         }
 
@@ -505,9 +521,10 @@ router.put(
           .where(eq(workers.workerId, user.workerId));
 
         return response.status(200).send("Profile photo updated successfully");
-      
-      } else if (user.role === "employer" && headers.get("platform") === "web-employer") {
-        if( user.employerPhoto && user.employerPhoto.r2Name ){ 
+
+      }
+      if (user.role === "employer" && headers.get("platform") === "web-employer") {
+        if (user.employerPhoto?.r2Name) {
           await s3Client.delete(`profile-photos/employers/${user.employerPhoto.r2Name}`);
         }
 
@@ -557,7 +574,7 @@ router.get("/employer/verification-documents", authenticated, async ({ user, res
 
     const documentsWithUrls = await Promise.all(
       documentsArray.map(async (doc: any) => {
-        if (doc && doc.r2Name && employer.identificationType) {
+        if (doc?.r2Name && employer.identificationType) {
           const filePath = `documents/${employer.identificationType}/${doc.r2Name}`;
           const url = await generatePresignedUrl(filePath);
           if (url) {
@@ -566,19 +583,19 @@ router.get("/employer/verification-documents", authenticated, async ({ user, res
               type: doc.type,
               url: url,
             };
-          } else {
-            console.warn(`Failed to generate presigned URL for document ${doc.r2Name} of employer ${employer.employerId}`);
-            // Return the document without a URL if generation fails, or omit it
-            return {
-              originalName: doc.originalName,
-              type: doc.type,
-              url: null, // Explicitly set URL to null
-              error: "Failed to generate URL for this document.",
-            };
           }
+          console.warn(`Failed to generate presigned URL for document ${doc.r2Name} of employer ${employer.employerId}`);
+          // Return the document without a URL if generation fails, or omit it
+          return {
+            originalName: doc.originalName,
+            type: doc.type,
+            url: null, // Explicitly set URL to null
+            error: "Failed to generate URL for this document.",
+          };
+
         }
         // If doc is malformed or r2Name is missing, filter it out or return with error
-        return null; 
+        return null;
       })
     );
 

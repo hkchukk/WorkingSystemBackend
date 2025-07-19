@@ -9,6 +9,8 @@ import validate from "@nhttp/zod";
 import { adminRegister } from "../Middleware/validator";
 import { hash } from "@node-rs/argon2";
 import { argon2Config } from "../config";
+import { emailClient } from "../Client/EmailClient";
+import NotificationHelper from "../Utils/NotificationHelper.ts";
 
 const router = new Router();
 
@@ -28,5 +30,43 @@ router.get("/pendingEmployer", authenticated, requireAdmin, async (rev) => {
 	});
 	return pendingEmployers;
 });
+
+router.patch(
+	"/approveEmployer/:id",
+	authenticated,
+	requireAdmin,
+	async (rev) => {
+		const { id } = rev.params;
+		const employerFound = await dbClient.query.employers.findFirst({
+			where: eq(employers.employerId, id),
+		});
+		if (!employerFound) {
+			return rev.response.status(404).send("Employer not found");
+		}
+		if (employerFound.approvalStatus !== "pending") {
+			return rev.response.status(400).send("Employer is not pending approval");
+		}
+		const updatedEmployer = await dbClient
+			.update(employers)
+			.set({ approvalStatus: "approved" })
+			.where(eq(employers.employerId, id))
+			.returning();
+
+		// 發送審核通過通知
+		await NotificationHelper.notifyAccountApproved(
+			employerFound.employerId,
+			employerFound.employerName
+		);
+
+		// TODO: Fill in email details
+		await emailClient.sendMail({
+			from: "",
+			to: employerFound.email,
+			subject: "",
+			text: ""
+		})
+		return updatedEmployer[0];
+	},
+);
 
 export default { path: "/admin", router } as IRouter;

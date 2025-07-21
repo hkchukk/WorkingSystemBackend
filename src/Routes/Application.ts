@@ -280,9 +280,21 @@ router.get("/worker/calendar", authenticated, requireWorker, async ({ user, quer
         )
       );
     } else if (hasDateRange) {
-      // 自訂日期範圍模式
-      dateStart ? whereConditions.push(gte(gigs.dateStart, dateStart)) : null;
-      dateEnd ? whereConditions.push(lte(gigs.dateEnd, dateEnd)) : null;
+      if (dateStart && dateEnd) {
+        // 工作期間與搜尋範圍有重疊
+        whereConditions.push(
+          and(
+            lte(gigs.dateStart, dateEnd),    // 工作開始 <= 搜尋結束
+            gte(gigs.dateEnd, dateStart)     // 工作結束 >= 搜尋開始
+          )
+        );
+      } else if (dateStart) {
+        // 只提供開始日期：工作結束日期 >= 搜尋開始日期
+        whereConditions.push(gte(gigs.dateEnd, dateStart));
+      } else if (dateEnd) {
+        // 只提供結束日期：工作開始日期 <= 搜尋結束日期
+        whereConditions.push(lte(gigs.dateStart, dateEnd));
+      }
     }
 
     // 執行資料庫查詢

@@ -3,7 +3,7 @@ import { authenticated } from "../Middleware/middleware.ts";
 import { requireWorker, requireEmployer, requireApprovedEmployer } from "../Middleware/guards.ts";
 import type IRouter from "../Interfaces/IRouter.ts";
 import dbClient from "../Client/DrizzleClient.ts";
-import { eq, and, desc, sql, count } from "drizzle-orm";
+import { eq, and, desc, sql, count, lt } from "drizzle-orm";
 import { gigs, gigApplications, workers, employers, workerRatings, employerRatings } from "../Schema/DatabaseSchema.ts";
 import validate from "@nhttp/zod";
 import { createRatingSchema } from "../Middleware/validator.ts";
@@ -62,7 +62,7 @@ router.post(
             // Gigs 表的過濾條件
             eq(gigs.gigId, gigId),
             eq(gigs.employerId, employerId),
-            sql`${gigs.dateEnd} < ${currentDate}` // 工作必須已結束
+            lt(gigs.dateEnd, currentDate) // 工作必須已結束
           )
         );
 
@@ -152,7 +152,7 @@ router.post(
             // Gigs 表的過濾條件
             eq(gigs.gigId, gigId),
             eq(gigs.employerId, employerId),
-            sql`${gigs.dateEnd} < ${currentDate}` // 工作必須已結束
+            lt(gigs.dateEnd, currentDate) // 工作必須已結束
           )
         );
 
@@ -499,7 +499,7 @@ router.get("/list/employer", authenticated, requireEmployer, requireApprovedEmpl
       ))
       .where(and(
         eq(gigs.employerId, employerId),
-        sql`${gigs.dateEnd} < ${currentDate}`, // 工作必須已結束
+        lt(gigs.dateEnd, currentDate), // 工作必須已結束
         sql`${workerRatings.ratingId} IS NULL` // 該商家未評分
       ))
       .orderBy(desc(gigs.dateEnd))
@@ -569,7 +569,7 @@ router.get("/list/worker", authenticated, requireWorker, async ({ user, response
       .where(and(
         eq(gigApplications.workerId, workerId),
         eq(gigApplications.status, "approved"),
-        sql`${gigs.dateEnd} < ${currentDate}`, // 工作必須已結束
+        lt(gigs.dateEnd, currentDate), // 工作必須已結束
         sql`${employerRatings.ratingId} IS NULL` // 該打工者未評分
       ))
       .orderBy(desc(gigs.dateEnd))

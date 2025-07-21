@@ -20,7 +20,7 @@ router.get("/list", authenticated, async ({ user, query, response }) => {
 
     // 建構查詢條件
     const whereConditions = [eq(notifications.receiverId, user.workerId || user.employerId || user.adminId)];
-    
+
     if (isUnreadOnly) {
       whereConditions.push(eq(notifications.isRead, false));
     }
@@ -170,12 +170,10 @@ router.post("/create-batch", authenticated, validate(createBatchNotificationSche
           totalRequested: receiverIds.length,
         },
       });
-    } else {
-      return response.status(500).json({
-        message: "批量建立通知失敗",
-      });
     }
-
+    return response.status(500).json({
+      message: "批量建立通知失敗",
+    });
   } catch (error) {
     console.error("批量建立通知失敗:", error);
     return response.status(500).json({
@@ -195,12 +193,10 @@ router.post("/create-group", authenticated, validate(createGroupNotificationSche
       return response.status(201).json({
         message: "群組通知發送成功",
       });
-    } else {
-      return response.status(500).json({
-        message: "群組通知發送失敗",
-      });
     }
-
+    return response.status(500).json({
+      message: "群組通知發送失敗",
+    });
   } catch (error) {
     console.error("發送群組通知失敗:", error);
     return response.status(500).json({

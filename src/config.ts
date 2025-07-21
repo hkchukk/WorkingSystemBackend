@@ -1,5 +1,5 @@
 import { Algorithm, Version, type Options } from "@node-rs/argon2";
-import { Options as EmailOptions } from "nodemailer/lib/smtp-connection";
+import type { Options as EmailOptions } from "nodemailer/lib/smtp-connection";
 
 export const argon2Config: Options = {
   algorithm: Algorithm.Argon2id,

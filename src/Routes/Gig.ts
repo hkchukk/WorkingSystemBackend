@@ -441,7 +441,7 @@ router.get(
 			if (application !== "true") {
 				const gig = await dbClient.query.gigs.findFirst({
 					where: and(
-						eq(gigs.gigId, gigId), 
+						eq(gigs.gigId, gigId),
 						eq(gigs.employerId, user.employerId),
 						eq(gigs.isActive, true)
 					),
@@ -463,7 +463,7 @@ router.get(
 			// 先查詢工作詳情
 			const gig = await dbClient.query.gigs.findFirst({
 				where: and(
-					eq(gigs.gigId, gigId), 
+					eq(gigs.gigId, gigId),
 					eq(gigs.employerId, user.employerId),
 					eq(gigs.isActive, true)
 				),
@@ -684,15 +684,14 @@ router.patch(
 					message: "工作已停用",
 					action: "disabled",
 				});
-			} else {
-				// 沒有已核准的申請者，直接刪除工作
-				await dbClient.delete(gigs).where(eq(gigs.gigId, gigId));
-
-				return response.status(200).send({
-					message: "工作已刪除",
-					action: "deleted",
-				});
 			}
+			// 沒有已核准的申請者，直接刪除工作
+			await dbClient.delete(gigs).where(eq(gigs.gigId, gigId));
+
+			return response.status(200).send({
+				message: "工作已刪除",
+				action: "deleted",
+			});
 		} catch (error) {
 			console.error("處理工作停用/刪除時出錯:", error);
 			return response.status(500).send("伺服器內部錯誤");

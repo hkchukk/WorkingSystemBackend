@@ -43,6 +43,13 @@
       "when": 1752934134705,
       "tag": "0005_jazzy_kate_bishop",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1753057475347,
+      "tag": "0006_daily_romulus",
+      "breakpoints": true
     }
   ]
 }

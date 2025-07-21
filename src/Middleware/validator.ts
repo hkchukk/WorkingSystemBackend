@@ -352,6 +352,12 @@ export const reviewApplicationSchema = z.object({
   }),
 });
 
+// 評分相關 Schema
+export const createRatingSchema = z.object({
+  ratingValue: z.number().int().min(1).max(5, "評分必須在1到5之間"),
+  comment: z.string().max(1000, "評論不能超過1000字").optional(),
+});
+
 // 通知相關 Schema
 export const createNotificationSchema = z.object({
   receiverId: z.string().min(1, "接收者ID不能為空"),

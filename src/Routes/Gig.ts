@@ -787,7 +787,7 @@ router.get("/public/", async ({ query, response }) => {
 			eq(gigs.isActive, true),
 			lte(gigs.publishedAt, today),
 			sql`(${gigs.unlistedAt} IS NULL OR ${gigs.unlistedAt} >= ${today})`,
-			gte(gigs.dateStart, searchDateStart)
+			gte(gigs.dateEnd, searchDateStart)
 		];
 
 		city ? whereConditions.push(eq(gigs.city, city)) : null;

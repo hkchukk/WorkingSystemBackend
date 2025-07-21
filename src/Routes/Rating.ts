@@ -229,7 +229,7 @@ router.get("/worker/:workerId", authenticated, requireEmployer, requireApprovedE
       .where(eq(workerRatings.workerId, workerId));
 
     const totalRatings = ratingStats[0].count;
-    const averageRating = totalRatings > 0 ? ratingStats[0].average : 0;
+    const averageRating = totalRatings > 0 ? Number(ratingStats[0].average) : 0;
 
     return response.send({
       data: {
@@ -278,13 +278,13 @@ router.get("/employer/:employerId", authenticated, requireWorker, async ({ param
     const ratingStats = await dbClient
       .select({
         count: count(),
-        average: sql<number>`coalesce(avg(${workerRatings.ratingValue}), 0)`,
+        average: sql<number>`coalesce(avg(${employerRatings.ratingValue}), 0)`,
       })
       .from(employerRatings)
       .where(eq(employerRatings.employerId, employerId));
 
     const totalRatings = ratingStats[0].count;
-    const averageRating = totalRatings > 0 ? ratingStats[0].average : 0;
+    const averageRating = totalRatings > 0 ? Number(ratingStats[0].average) : 0;
 
     return response.send({
       data: {

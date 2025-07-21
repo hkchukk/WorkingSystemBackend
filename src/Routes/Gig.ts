@@ -758,7 +758,7 @@ router.get("/public/", async ({ query, response }) => {
 	try {
 		const {
 			limit = 10,
-			offset = 0,
+			page = 1,
 			city,
 			district,
 			minRate,
@@ -774,7 +774,7 @@ router.get("/public/", async ({ query, response }) => {
 		}
 
 		const requestLimit = Number.parseInt(limit);
-		const requestOffset = Number.parseInt(offset);
+		const requestPage = Number.parseInt(page);
 		const minRateFilter = minRate ? Number.parseInt(minRate) : null;
 		const maxRateFilter = maxRate ? Number.parseInt(maxRate) : null;
 
@@ -798,7 +798,7 @@ router.get("/public/", async ({ query, response }) => {
 			where: and(...whereConditions),
 			orderBy: [desc(gigs.createdAt)],
 			limit: requestLimit + 1, // 多查一筆來確認是否有更多資料
-			offset: requestOffset,
+			offset: limit * (requestPage - 1),
 			columns: {
 				gigId: true,
 				title: true,
@@ -816,7 +816,7 @@ router.get("/public/", async ({ query, response }) => {
 			gigs: availableGigs,
 			pagination: {
 				limit: requestLimit,
-				offset: requestOffset,
+				page: requestPage,
 				hasMore,
 				returned: availableGigs.length,
 			},

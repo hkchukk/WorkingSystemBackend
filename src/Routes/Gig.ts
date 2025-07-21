@@ -780,13 +780,14 @@ router.get("/public/", async ({ query, response }) => {
 
 		// 處理日期邏輯
 		const today = moment().format("YYYY-MM-DD");
+		const searchDateStart = dateStart || today;
 
 		// 建立查詢條件
 		const whereConditions = [
 			eq(gigs.isActive, true),
 			lte(gigs.publishedAt, today),
 			sql`(${gigs.unlistedAt} IS NULL OR ${gigs.unlistedAt} >= ${today})`,
-			gte(gigs.dateEnd, dateStart)
+			gte(gigs.dateStart, searchDateStart)
 		];
 
 		city ? whereConditions.push(eq(gigs.city, city)) : null;

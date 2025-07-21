@@ -2,32 +2,32 @@ import { Router } from "@nhttp/nhttp";
 import { authenticated } from "../Middleware/middleware.ts";
 import type IRouter from "../Interfaces/IRouter.ts";
 import dbClient from "../Client/DrizzleClient.ts";
-import { eq, and, desc, count } from "drizzle-orm";
+import { eq, and, desc, inArray } from "drizzle-orm";
 import { notifications } from "../Schema/DatabaseSchema.ts";
 import validate from "@nhttp/zod";
-import { createNotificationSchema, markAsReadSchema } from "../Middleware/validator.ts";
+import { createNotificationSchema, markAsReadSchema, createBatchNotificationSchema, createGroupNotificationSchema } from "../Middleware/validator.ts";
+import NotificationHelper from "../Utils/NotificationHelper.ts";
 
 const router = new Router();
 
 // 獲取當前用戶的通知列表
 router.get("/list", authenticated, async ({ user, query, response }) => {
   try {
-    const { limit = 10, offset = 0, unreadOnly } = query;
+    const { limit = 10, offset = 0, unreadOnly = false } = query;
     const requestLimit = Number.parseInt(limit);
     const requestOffset = Number.parseInt(offset);
     const isUnreadOnly = unreadOnly === "true";
 
     // 建構查詢條件
-    let whereCondition = eq(notifications.receiverId, user.workerId || user.employerId || user.adminId);
+    const whereConditions = [eq(notifications.receiverId, user.workerId || user.employerId || user.adminId)];
 
     if (isUnreadOnly) {
-      whereCondition = and(
-        whereCondition,
-        eq(notifications.isRead, false)
-      );
+      whereConditions.push(eq(notifications.isRead, false));
     }
 
-    // 獲取通知列表 (只顯示部分訊息)
+    const whereCondition = whereConditions.length === 1 ? whereConditions[0] : and(...whereConditions);
+
+    // 獲取通知列表
     const notificationList = await dbClient.query.notifications.findMany({
       where: whereCondition,
       orderBy: [desc(notifications.createdAt)],
@@ -69,15 +69,10 @@ router.get("/list", authenticated, async ({ user, query, response }) => {
 // 獲取未讀通知數量
 router.get("/unread-count", authenticated, async ({ user, response }) => {
   try {
-    const unreadResult = await dbClient
-      .select({ count: count() })
-      .from(notifications)
-      .where(and(
-        eq(notifications.receiverId, user.workerId || user.employerId || user.adminId),
-        eq(notifications.isRead, false)
-      ));
-
-    const unreadCount = unreadResult[0]?.count || 0;
+    const unreadCount = await dbClient.$count(notifications, and(
+      eq(notifications.receiverId, user.workerId || user.employerId || user.adminId),
+      eq(notifications.isRead, false)
+    ));
 
     return response.status(200).json({
       data: {
@@ -98,41 +93,31 @@ router.put("/mark-as-read", authenticated, validate(markAsReadSchema), async ({ 
   try {
     const { notificationIds } = body;
 
-    // 驗證通知是否屬於當前用戶
-    const userNotifications = await dbClient.query.notifications.findMany({
-      where: eq(notifications.receiverId, user.workerId || user.employerId || user.adminId),
-      columns: {
-        notificationId: true,
-      },
-    });
+    // 驗證通知是否屬於當前用戶並批量更新
+    const currentDate = new Date();
+    const result = await dbClient
+      .update(notifications)
+      .set({
+        isRead: true,
+        readAt: currentDate,
+        updatedAt: currentDate,
+      })
+      .where(and(
+        eq(notifications.receiverId, user.workerId || user.employerId || user.adminId),
+        inArray(notifications.notificationId, notificationIds)
+      ))
+      .returning({ notificationId: notifications.notificationId });
 
-    const userNotificationIds = userNotifications.map(n => n.notificationId);
-    const validNotificationIds = notificationIds.filter(id => userNotificationIds.includes(id));
-
-    if (validNotificationIds.length === 0) {
+    if (result.length === 0) {
       return response.status(400).json({
         message: "找不到有效的通知",
       });
     }
 
-    // 批量更新為已讀
-    const updatePromises = validNotificationIds.map(id =>
-      dbClient
-        .update(notifications)
-        .set({
-          isRead: true,
-          readAt: new Date(),
-          updatedAt: new Date(),
-        })
-        .where(eq(notifications.notificationId, id))
-    );
-
-    await Promise.all(updatePromises);
-
     return response.status(200).json({
-      message: `成功標記 ${validNotificationIds.length} 條通知為已讀`,
+      message: `成功標記 ${result.length} 條通知為已讀`,
       data: {
-        updatedCount: validNotificationIds.length,
+        updatedCount: result.length,
       },
     });
 
@@ -140,33 +125,6 @@ router.put("/mark-as-read", authenticated, validate(markAsReadSchema), async ({ 
     console.error("標記通知已讀失敗:", error);
     return response.status(500).json({
       message: "標記通知已讀失敗",
-    });
-  }
-});
-
-// 標記所有通知為已讀
-router.put("/mark-all-as-read", authenticated, async ({ user, response }) => {
-  try {
-    await dbClient
-      .update(notifications)
-      .set({
-        isRead: true,
-        readAt: new Date(),
-        updatedAt: new Date(),
-      })
-      .where(and(
-        eq(notifications.receiverId, user.workerId || user.employerId || user.adminId),
-        eq(notifications.isRead, false)
-      ));
-
-    return response.status(200).json({
-      message: "成功標記所有通知為已讀",
-    });
-
-  } catch (error) {
-    console.error("標記所有通知已讀失敗:", error);
-    return response.status(500).json({
-      message: "標記所有通知已讀失敗",
     });
   }
 });
@@ -193,6 +151,56 @@ router.post("/create", authenticated, validate(createNotificationSchema), async 
     console.error("建立通知失敗:", error);
     return response.status(500).json({
       message: "建立通知失敗",
+    });
+  }
+});
+
+// 批量建立通知 (管理員或系統內部使用)
+router.post("/create-batch", authenticated, validate(createBatchNotificationSchema), async ({ body, response }) => {
+  try {
+    const { receiverIds, title, message, type } = body;
+
+    const success = await NotificationHelper.createBatch(receiverIds, { title, message, type });
+
+    if (success) {
+      return response.status(201).json({
+        message: `成功建立 ${receiverIds.length} 條通知`,
+        data: {
+          totalCreated: receiverIds.length,
+          totalRequested: receiverIds.length,
+        },
+      });
+    }
+    return response.status(500).json({
+      message: "批量建立通知失敗",
+    });
+  } catch (error) {
+    console.error("批量建立通知失敗:", error);
+    return response.status(500).json({
+      message: "批量建立通知失敗",
+    });
+  }
+});
+
+// 發送通知給指定用戶群組 (管理員或系統內部使用)
+router.post("/create-group", authenticated, validate(createGroupNotificationSchema), async ({ body, response }) => {
+  try {
+    const { groups, title, message, type } = body;
+
+    const success = await NotificationHelper.notifyUserGroups(groups, title, message, type);
+
+    if (success) {
+      return response.status(201).json({
+        message: "群組通知發送成功",
+      });
+    }
+    return response.status(500).json({
+      message: "群組通知發送失敗",
+    });
+  } catch (error) {
+    console.error("發送群組通知失敗:", error);
+    return response.status(500).json({
+      message: "發送群組通知失敗",
     });
   }
 });

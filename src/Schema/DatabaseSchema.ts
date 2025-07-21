@@ -204,6 +204,11 @@ export const workerRatings = pgTable("worker_ratings", {
     .$defaultFn(() => nanoid())
     .primaryKey(),
 
+  // 關聯到具體的工作
+  gigId: varchar("gig_id", { length: 21 })
+    .notNull()
+    .references(() => gigs.gigId, { onDelete: "cascade" }),
+
   workerId: varchar("worker_id", { length: 21 })
     .notNull()
     .references(() => workers.workerId, { onDelete: "cascade" }),
@@ -224,6 +229,11 @@ export const employerRatings = pgTable("employer_ratings", {
   ratingId: varchar("rating_id", { length: 21 })
     .$defaultFn(() => nanoid())
     .primaryKey(),
+
+  // 關聯到具體的工作
+  gigId: varchar("gig_id", { length: 21 })
+    .notNull()
+    .references(() => gigs.gigId, { onDelete: "cascade" }),
 
   employerId: varchar("employer_id", { length: 21 })
     .notNull()
@@ -289,6 +299,8 @@ export const gigsRelations = relations(gigs, ({ one, many }) => ({
     references: [employers.employerId],
   }),
   gigApplications: many(gigApplications),
+  workerRatings: many(workerRatings),
+  employerRatings: many(employerRatings),
 }));
 
 // GigApplications
@@ -316,6 +328,10 @@ export const workerRatingsRelations = relations(workerRatings, ({ one }) => ({
     fields: [workerRatings.employerId],
     references: [employers.employerId],
   }),
+  gig: one(gigs, {
+    fields: [workerRatings.gigId],
+    references: [gigs.gigId],
+  }),
 }));
 
 // EmployerRatings
@@ -329,6 +345,10 @@ export const employerRatingsRelations = relations(
     worker: one(workers, {
       fields: [employerRatings.workerId],
       references: [workers.workerId],
+    }),
+    gig: one(gigs, {
+      fields: [employerRatings.gigId],
+      references: [gigs.gigId],
     }),
   }),
 );

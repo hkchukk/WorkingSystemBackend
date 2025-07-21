@@ -352,6 +352,12 @@ export const reviewApplicationSchema = z.object({
   }),
 });
 
+// 評分相關 Schema
+export const createRatingSchema = z.object({
+  ratingValue: z.number().int().min(1).max(5, "評分必須在1到5之間"),
+  comment: z.string().max(1000, "評論不能超過1000字").optional(),
+});
+
 // 通知相關 Schema
 export const createNotificationSchema = z.object({
   receiverId: z.string().min(1, "接收者ID不能為空"),
@@ -362,6 +368,26 @@ export const createNotificationSchema = z.object({
 
 export const markAsReadSchema = z.object({
   notificationIds: z.array(z.string()).min(1, "至少需要一個通知ID"),
+});
+
+export const createBatchNotificationSchema = z.object({
+  receiverIds: z.array(z.string()).min(1, "至少需要一個接收者ID"),
+  title: z.string().min(1, "標題不能為空").max(256, "標題過長"),
+  message: z.string().min(1, "訊息不能為空"),
+  type: z.string().min(1, "通知類型不能為空"),
+});
+
+export const createGroupNotificationSchema = z.object({
+  groups: z.object({
+    workers: z.boolean().optional(),
+    employers: z.boolean().optional(),
+    admins: z.boolean().optional(),
+  }).refine(data => Object.values(data).some(Boolean), {
+    message: "至少需要選擇一個用戶群組"
+  }),
+  title: z.string().min(1, "標題不能為空").max(256, "標題過長"),
+  message: z.string().min(1, "訊息不能為空"),
+  type: z.string().min(1, "通知類型不能為空"),
 });
 
 export const adminRegister = z.object({

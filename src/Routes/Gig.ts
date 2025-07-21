@@ -6,7 +6,7 @@ import {
 } from "../Middleware/guards.ts";
 import type IRouter from "../Interfaces/IRouter.ts";
 import dbClient from "../Client/DrizzleClient.ts";
-import { eq, and, desc, sql, gte, lte, or } from "drizzle-orm";
+import { eq, and, desc, sql, gte, lte, or, lt, gt } from "drizzle-orm";
 import { gigs, gigApplications } from "../Schema/DatabaseSchema.ts";
 import validate from "@nhttp/zod";
 import { createGigSchema, updateGigSchema } from "../Middleware/validator.ts";
@@ -374,16 +374,16 @@ router.get(
 			if (status && ['not_started', 'ongoing', 'completed'].includes(status)) {
 				if (status === 'not_started') {
 					// 未開始：dateStart > currentDate
-					whereConditions.push(sql`${gigs.dateStart} > ${currentDate}`);
+					whereConditions.push(gt(gigs.dateStart, currentDate));
 				} else if (status === 'completed') {
 					// 已結束：dateEnd < currentDate
-					whereConditions.push(sql`${gigs.dateEnd} < ${currentDate}`);
+					whereConditions.push(lt(gigs.dateEnd, currentDate));
 				} else if (status === 'ongoing') {
 					// 進行中：dateStart <= currentDate AND dateEnd >= currentDate
 					whereConditions.push(
 						and(
-							sql`${gigs.dateStart} <= ${currentDate}`,
-							sql`${gigs.dateEnd} >= ${currentDate}`
+							lte(gigs.dateStart, currentDate),
+							gte(gigs.dateEnd, currentDate)
 						)
 					);
 				}
@@ -441,7 +441,7 @@ router.get(
 			if (application !== "true") {
 				const gig = await dbClient.query.gigs.findFirst({
 					where: and(
-						eq(gigs.gigId, gigId), 
+						eq(gigs.gigId, gigId),
 						eq(gigs.employerId, user.employerId),
 						eq(gigs.isActive, true)
 					),
@@ -463,7 +463,7 @@ router.get(
 			// 先查詢工作詳情
 			const gig = await dbClient.query.gigs.findFirst({
 				where: and(
-					eq(gigs.gigId, gigId), 
+					eq(gigs.gigId, gigId),
 					eq(gigs.employerId, user.employerId),
 					eq(gigs.isActive, true)
 				),
@@ -684,15 +684,14 @@ router.patch(
 					message: "工作已停用",
 					action: "disabled",
 				});
-			} else {
-				// 沒有已核准的申請者，直接刪除工作
-				await dbClient.delete(gigs).where(eq(gigs.gigId, gigId));
-
-				return response.status(200).send({
-					message: "工作已刪除",
-					action: "deleted",
-				});
 			}
+			// 沒有已核准的申請者，直接刪除工作
+			await dbClient.delete(gigs).where(eq(gigs.gigId, gigId));
+
+			return response.status(200).send({
+				message: "工作已刪除",
+				action: "deleted",
+			});
 		} catch (error) {
 			console.error("處理工作停用/刪除時出錯:", error);
 			return response.status(500).send("伺服器內部錯誤");
@@ -759,13 +758,12 @@ router.get("/public/", async ({ query, response }) => {
 	try {
 		const {
 			limit = 10,
-			offset = 0,
+			page = 1,
 			city,
 			district,
 			minRate,
 			maxRate,
-			dateStart,
-			dateEnd
+			dateStart
 		} = query;
 
 		// 驗證 city 和 district 必須成對
@@ -776,7 +774,7 @@ router.get("/public/", async ({ query, response }) => {
 		}
 
 		const requestLimit = Number.parseInt(limit);
-		const requestOffset = Number.parseInt(offset);
+		const requestPage = Number.parseInt(page);
 		const minRateFilter = minRate ? Number.parseInt(minRate) : null;
 		const maxRateFilter = maxRate ? Number.parseInt(maxRate) : null;
 
@@ -789,10 +787,9 @@ router.get("/public/", async ({ query, response }) => {
 			eq(gigs.isActive, true),
 			lte(gigs.publishedAt, today),
 			sql`(${gigs.unlistedAt} IS NULL OR ${gigs.unlistedAt} >= ${today})`,
-			gte(gigs.dateStart, searchDateStart),
+			gte(gigs.dateEnd, searchDateStart)
 		];
 
-		dateEnd ? whereConditions.push(lte(gigs.dateEnd, dateEnd)) : null;
 		city ? whereConditions.push(eq(gigs.city, city)) : null;
 		district ? whereConditions.push(eq(gigs.district, district)) : null;
 		minRateFilter ? whereConditions.push(gte(gigs.hourlyRate, minRateFilter)) : null;
@@ -802,7 +799,7 @@ router.get("/public/", async ({ query, response }) => {
 			where: and(...whereConditions),
 			orderBy: [desc(gigs.createdAt)],
 			limit: requestLimit + 1, // 多查一筆來確認是否有更多資料
-			offset: requestOffset,
+			offset: limit * (requestPage - 1),
 			columns: {
 				gigId: true,
 				title: true,
@@ -820,7 +817,7 @@ router.get("/public/", async ({ query, response }) => {
 			gigs: availableGigs,
 			pagination: {
 				limit: requestLimit,
-				offset: requestOffset,
+				page: requestPage,
 				hasMore,
 				returned: availableGigs.length,
 			},
@@ -829,8 +826,7 @@ router.get("/public/", async ({ query, response }) => {
 				district,
 				minRate: minRateFilter,
 				maxRate: maxRateFilter,
-				dateStart: searchDateStart,
-				dateEnd,
+				dateStart,
 			},
 		});
 	} catch (error) {
@@ -919,7 +915,7 @@ router.get("/employer/calendar", authenticated, requireEmployer, requireApproved
 			eq(gigs.employerId, user.employerId),
 			eq(gigs.isActive, true),
 			lte(gigs.publishedAt, currentDate),
-			sql`(${gigs.unlistedAt} IS NULL OR ${gigs.unlistedAt} >= ${currentDate})`
+			sql`(${gigs.unlistedAt} IS NULL OR ${gigs.unlistedAt} >= ${currentDate})`,
 		];
 
 		// 處理日期查詢邏輯
@@ -947,9 +943,21 @@ router.get("/employer/calendar", authenticated, requireEmployer, requireApproved
 				)
 			);
 		} else if (hasDateRange) {
-			// 自訂日期範圍模式
-			dateStart ? whereConditions.push(gte(gigs.dateStart, dateStart)) : null;
-			dateEnd ? whereConditions.push(lte(gigs.dateEnd, dateEnd)) : null;
+			if (dateStart && dateEnd) {
+				// 工作期間與搜尋範圍有重疊
+				whereConditions.push(
+					and(
+						lte(gigs.dateStart, dateEnd),
+						gte(gigs.dateEnd, dateStart)
+					)
+				);
+			} else if (dateStart) {
+				// 只提供開始日期
+				whereConditions.push(gte(gigs.dateEnd, dateStart));
+			} else if (dateEnd) {
+				// 只提供結束日期
+				whereConditions.push(lte(gigs.dateStart, dateEnd));
+			}
 		}
 
 		const calendarGigs = await dbClient.query.gigs.findMany({

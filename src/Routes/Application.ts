@@ -234,17 +234,17 @@ router.get("/my-applications", authenticated, requireWorker, async ({ user, quer
  */
 router.get("/worker/calendar", authenticated, requireWorker, async ({ user, query, response }) => {
   try {
-    const { 
-      year, 
-      month, 
-      dateStart, 
-      dateEnd 
+    const {
+      year,
+      month,
+      dateStart,
+      dateEnd
     } = query;
-    
+
     // 檢查是否提供了必要的日期參數
     const hasYearMonth = year && month;
     const hasDateRange = dateStart || dateEnd;
-    
+
     if (!hasYearMonth && !hasDateRange) {
       return response.status(400).send({
         error: "必須提供年月參數 (year, month) 或日期範圍參數 (dateStart, dateEnd)"
@@ -256,22 +256,22 @@ router.get("/worker/calendar", authenticated, requireWorker, async ({ user, quer
       eq(gigApplications.workerId, user.workerId),
       eq(gigApplications.status, "approved")
     ];
-    
+
     // 根據日期參數添加過濾條件
     if (hasYearMonth) {
       // 月份查詢模式
       const yearNum = Number.parseInt(year);
       const monthNum = Number.parseInt(month);
-      
+
       if (yearNum < 2020 || yearNum > 2050 || monthNum < 1 || monthNum > 12) {
         return response.status(400).send({
           error: "年份必須在 2020-2050 之間，月份必須在 1-12 之間"
         });
       }
-      
+
       const startDate = moment(`${yearNum}-${monthNum.toString().padStart(2, '0')}-01`).format('YYYY-MM-DD');
       const endDate = moment(startDate).endOf('month').format('YYYY-MM-DD');
-      
+
       // 過濾工作期間與該月有重疊的工作
       whereConditions.push(
         and(
@@ -280,9 +280,21 @@ router.get("/worker/calendar", authenticated, requireWorker, async ({ user, quer
         )
       );
     } else if (hasDateRange) {
-      // 自訂日期範圍模式
-      dateStart ? whereConditions.push(gte(gigs.dateStart, dateStart)) : null;
-      dateEnd ? whereConditions.push(lte(gigs.dateEnd, dateEnd)) : null;
+      if (dateStart && dateEnd) {
+        // 工作期間與搜尋範圍有重疊
+        whereConditions.push(
+          and(
+            lte(gigs.dateStart, dateEnd),    // 工作開始 <= 搜尋結束
+            gte(gigs.dateEnd, dateStart)     // 工作結束 >= 搜尋開始
+          )
+        );
+      } else if (dateStart) {
+        // 只提供開始日期：工作結束日期 >= 搜尋開始日期
+        whereConditions.push(gte(gigs.dateEnd, dateStart));
+      } else if (dateEnd) {
+        // 只提供結束日期：工作開始日期 <= 搜尋結束日期
+        whereConditions.push(lte(gigs.dateStart, dateEnd));
+      }
     }
 
     // 執行資料庫查詢
@@ -598,14 +610,13 @@ router.get("/gig/all", authenticated, requireEmployer, requireApprovedEmployer, 
     // 按工作分組並整合統計與申請資料
     const gigsWithApplications = actualApplications.reduce((acc: Record<string, any>, app) => {
       const gigId = app.gigId;
-      if (!acc[gigId]) {
-        acc[gigId] = {
-          gigId: app.gig.gigId,
-          gigTitle: app.gig.title,
-          applicationCount: 0,
-          applications: []
-        };
-      }
+
+      acc[gigId] ??= {
+        gigId: app.gig.gigId,
+        gigTitle: app.gig.title,
+        applicationCount: 0,
+        applications: []
+      };
 
       acc[gigId].applicationCount++;
       acc[gigId].applications.push({

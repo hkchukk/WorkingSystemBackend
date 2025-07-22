@@ -34,6 +34,9 @@ export const requireApprovedEmployer: Handler = async (rev, next) => {
   try {
     const employer = await dbClient.query.employers.findFirst({
       where: eq(employers.employerId, rev.user.employerId),
+      columns: {
+        approvalStatus: true,
+      },
     });
 
     //if (!employer || employer.approvalStatus !== "approved") {

@@ -30,45 +30,49 @@ router.post(
       const employerId = user.employerId;
 
       // 檢查是否已經評分過
-      const existingRating = await dbClient
-        .select({ value: count() })
-        .from(workerRatings)
-        .where(and(eq(workerRatings.gigId, gigId), eq(workerRatings.workerId, workerId), eq(workerRatings.employerId, employerId)));
+      const existingRating = await dbClient.query.workerRatings.findFirst({
+        where: and(
+          eq(workerRatings.gigId, gigId), 
+          eq(workerRatings.workerId, workerId), 
+          eq(workerRatings.employerId, employerId)
+        ),
+        columns: {
+          ratingId: true
+        }
+      });
 
-      const hasRated = existingRating[0].value > 0;
-
-      if (hasRated) {
+      if (existingRating) {
         return response.status(400).send({
           message: "您已經對這位打工者評分過了",
         });
       }
 
-      // 直接查詢符合所有條件的紀錄總數，並檢查工作是否已結束
+      // 直接查詢符合所有條件的記錄，並檢查工作是否已結束
       const currentDate = moment().format("YYYY-MM-DD"); // YYYY-MM-DD 格式
-      const result = await dbClient
-        .select({ value: count() })
-        .from(gigs)
-        .innerJoin(
-          gigApplications,
-          and(
-            // JOIN 的條件
-            eq(gigs.gigId, gigApplications.gigId),
-            eq(gigApplications.workerId, workerId),
-            eq(gigApplications.status, "approved")
-          )
-        )
-        .where(
-          and(
-            // Gigs 表的過濾條件
-            eq(gigs.gigId, gigId),
-            eq(gigs.employerId, employerId),
-            lt(gigs.dateEnd, currentDate) // 工作必須已結束
-          )
-        );
+      const validGig = await dbClient.query.gigs.findFirst({
+        where: and(
+          eq(gigs.gigId, gigId),
+          eq(gigs.employerId, employerId),
+          lt(gigs.dateEnd, currentDate) // 工作必須已結束
+        ),
+        columns: {
+          gigId: true
+        },
+        with: {
+          gigApplications: {
+            where: and(
+              eq(gigApplications.workerId, workerId),
+              eq(gigApplications.status, "approved")
+            ),
+            limit: 1,
+            columns: {
+              applicationId: true
+            }
+          }
+        }
+      });
 
-      const exists = result[0].value > 0;
-
-      if (!exists) {
+      if (!validGig) {
         return response.status(404).send({
           message: "找不到可評分的工作、指定的打工者沒有已批准的申請，或工作尚未結束",
         });
@@ -120,45 +124,49 @@ router.post(
       const workerId = user.workerId;
 
       // 檢查是否已經評分過
-      const existingRating = await dbClient
-        .select({ value: count() })
-        .from(employerRatings)
-        .where(and(eq(employerRatings.gigId, gigId), eq(employerRatings.workerId, workerId), eq(employerRatings.employerId, employerId)));
+      const existingRating = await dbClient.query.employerRatings.findFirst({
+        where: and(
+          eq(employerRatings.gigId, gigId), 
+          eq(employerRatings.workerId, workerId), 
+          eq(employerRatings.employerId, employerId)
+        ),
+        columns: {
+          ratingId: true
+        }
+      });
 
-      const hasRated = existingRating[0].value > 0;
-
-      if (hasRated) {
+      if (existingRating) {
         return response.status(400).send({
           message: "您已經對這個商家評分過了",
         });
       }
       
-      // 直接查詢符合所有條件的紀錄總數，並檢查工作是否已結束
+      // 直接查詢符合所有條件的記錄，並檢查工作是否已結束
       const currentDate = moment().format("YYYY-MM-DD"); // YYYY-MM-DD 格式
-      const result = await dbClient
-        .select({ value: count() })
-        .from(gigs)
-        .innerJoin(
-          gigApplications,
-          and(
-            // JOIN 的條件
-            eq(gigs.gigId, gigApplications.gigId),
-            eq(gigApplications.workerId, workerId),
-            eq(gigApplications.status, "approved")
-          )
-        )
-        .where(
-          and(
-            // Gigs 表的過濾條件
-            eq(gigs.gigId, gigId),
-            eq(gigs.employerId, employerId),
-            lt(gigs.dateEnd, currentDate) // 工作必須已結束
-          )
-        );
+      const validGig = await dbClient.query.gigs.findFirst({
+        where: and(
+          eq(gigs.gigId, gigId),
+          eq(gigs.employerId, employerId),
+          lt(gigs.dateEnd, currentDate) // 工作必須已結束
+        ),
+        columns: {
+          gigId: true
+        },
+        with: {
+          gigApplications: {
+            where: and(
+              eq(gigApplications.workerId, workerId),
+              eq(gigApplications.status, "approved")
+            ),
+            limit: 1,
+            columns: {
+              applicationId: true
+            }
+          }
+        }
+      });
 
-      const exists = result[0].value > 0;
-
-      if (!exists) {
+      if (!validGig) {
         return response.status(404).send({
           message: "找不到可評分的工作、您沒有此工作的已批准申請，或工作尚未結束",
         });
@@ -458,6 +466,162 @@ router.get("/my-ratings/worker", authenticated, requireWorker, async ({ user, re
     console.error("獲取打工者評分記錄時發生錯誤:", error);
     return response.status(500).send({
       message: "獲取評分記錄失敗，請稍後再試",
+    });
+  }
+});
+
+// ========== 收到的評分 ==========
+
+/**
+ * 商家獲取別人給自己的所有評分
+ * GET /rating/received-ratings/employer
+ */
+router.get("/received-ratings/employer", authenticated, requireEmployer, async ({ user, response, query }) => {
+  try {
+    const { limit = 10, offset = 0 } = query;
+    const requestLimit = Number.parseInt(limit);
+    const requestOffset = Number.parseInt(offset);
+    const employerId = user.employerId;
+
+    // 獲取商家收到的所有評分
+    const receivedRatings = await dbClient.query.employerRatings.findMany({
+      where: eq(employerRatings.employerId, employerId),
+      columns: {
+        ratingId: true,
+        ratingValue: true,
+        comment: true,
+        createdAt: true,
+      },
+      with: {
+        worker: {
+          columns: {
+            workerId: true,
+            firstName: true,
+            lastName: true,
+          },
+        },
+        gig: {
+          columns: {
+            gigId: true,
+            title: true,
+            dateEnd: true,
+          },
+        },
+      },
+      orderBy: [desc(employerRatings.createdAt)],
+      limit: requestLimit + 1, // 多查一筆來確認是否有更多資料
+      offset: requestOffset,
+    });
+
+    const hasMore = receivedRatings.length > requestLimit;
+    const returnRatings = hasMore ? receivedRatings.slice(0, requestLimit) : receivedRatings;
+
+    return response.send({
+      data: {
+        receivedRatings: returnRatings.map((rating) => ({
+          ratingId: rating.ratingId,
+          worker: {
+            workerId: rating.worker.workerId,
+            name: `${rating.worker.firstName} ${rating.worker.lastName}`,
+          },
+          gig: {
+            gigId: rating.gig.gigId,
+            title: rating.gig.title,
+            endDate: rating.gig.dateEnd,
+          },
+          ratingValue: rating.ratingValue,
+          comment: rating.comment,
+          createdAt: rating.createdAt,
+        })),
+        pagination: {
+          limit: requestLimit,
+          offset: requestOffset,
+          hasMore,
+          returned: returnRatings.length,
+        },
+      },
+    });
+  } catch (error) {
+    console.error("獲取商家收到的評分記錄時發生錯誤:", error);
+    return response.status(500).send({
+      message: "獲取收到的評分記錄失敗，請稍後再試",
+    });
+  }
+});
+
+/**
+ * 打工者獲取別人給自己的所有評分
+ * GET /rating/received-ratings/worker
+ */
+router.get("/received-ratings/worker", authenticated, requireWorker, async ({ user, response, query }) => {
+  try {
+    const { limit = 10, offset = 0 } = query;
+    const requestLimit = Number.parseInt(limit);
+    const requestOffset = Number.parseInt(offset);
+    const workerId = user.workerId;
+
+    // 獲取打工者收到的所有評分
+    const receivedRatings = await dbClient.query.workerRatings.findMany({
+      where: eq(workerRatings.workerId, workerId),
+      columns: {
+        ratingId: true,
+        ratingValue: true,
+        comment: true,
+        createdAt: true,
+      },
+      with: {
+        employer: {
+          columns: {
+            employerId: true,
+            employerName: true,
+            branchName: true,
+          },
+        },
+        gig: {
+          columns: {
+            gigId: true,
+            title: true,
+            dateEnd: true,
+          },
+        },
+      },
+      orderBy: [desc(workerRatings.createdAt)],
+      limit: requestLimit + 1, // 多查一筆來確認是否有更多資料
+      offset: requestOffset,
+    });
+
+    const hasMore = receivedRatings.length > requestLimit;
+    const returnRatings = hasMore ? receivedRatings.slice(0, requestLimit) : receivedRatings;
+
+    return response.send({
+      data: {
+        receivedRatings: returnRatings.map((rating) => ({
+          ratingId: rating.ratingId,
+          employer: {
+            employerId: rating.employer.employerId,
+            name: rating.employer.branchName ? `${rating.employer.employerName} - ${rating.employer.branchName}` : rating.employer.employerName,
+          },
+          gig: {
+            gigId: rating.gig.gigId,
+            title: rating.gig.title,
+            endDate: rating.gig.dateEnd,
+          },
+          ratingValue: rating.ratingValue,
+          comment: rating.comment,
+          createdAt: rating.createdAt,
+        })),
+        pagination: {
+          limit: requestLimit,
+          offset: requestOffset,
+          hasMore,
+          returned: returnRatings.length,
+        },
+      },
+    });
+  } catch (error) {
+    console.error("獲取打工者收到的評分記錄時發生錯誤:", error);
+    return response.status(500).send({
+      message: "獲取收到的評分記錄失敗，請稍後再試",
     });
   }
 });

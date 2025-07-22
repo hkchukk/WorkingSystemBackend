@@ -797,7 +797,10 @@ router.get("/public/", async ({ query, response }) => {
 
 		const availableGigs = await dbClient.query.gigs.findMany({
 			where: and(...whereConditions),
-			orderBy: [desc(gigs.createdAt)],
+			orderBy: [
+				sql`CASE WHEN ${gigs.dateStart}::date >= ${today}::date THEN 0 ELSE 1 END ASC`,
+				sql`ABS(${gigs.dateStart}::date - ${today}::date) ASC`
+			],
 			limit: requestLimit + 1, // 多查一筆來確認是否有更多資料
 			offset: limit * (requestPage - 1),
 			columns: {
@@ -826,7 +829,7 @@ router.get("/public/", async ({ query, response }) => {
 				district,
 				minRate: minRateFilter,
 				maxRate: maxRateFilter,
-				dateStart,
+				dateStart: searchDateStart,
 			},
 		});
 	} catch (error) {

@@ -11,21 +11,11 @@ import { gigs, gigApplications } from "../Schema/DatabaseSchema.ts";
 import validate from "@nhttp/zod";
 import { createGigSchema, updateGigSchema } from "../Middleware/validator.ts";
 import { uploadEnvironmentPhotos } from "../Middleware/uploadFile.ts";
-import { S3Client } from "bun";
 import moment from "moment";
-import { PresignedUrlCache } from "../Client/RedisClient.ts";
 import NotificationHelper from "../Utils/NotificationHelper.ts";
+import { s3Client, generatePresignedUrl, clearPresignedUrlCache, cleanupTempFiles } from "../Utils/FileUtils.ts";
 
 const router = new Router();
-
-const client = new S3Client({
-	region: "auto",
-	accessKeyId: process.env.R2ACCESSKEYID,
-	secretAccessKey: process.env.R2SECRETACCESSKEY,
-	endpoint: process.env.R2ENDPOINT,
-	bucket: "backend-files",
-	retry: 1,
-});
 
 // 統一的照片上傳處理函數
 async function handlePhotoUpload(reqFile: any, existingPhotos: any[] = []) {
@@ -88,7 +78,7 @@ async function handlePhotoUpload(reqFile: any, existingPhotos: any[] = []) {
 					throw new Error(`檔案不存在: ${file.path}`);
 				}
 
-				await client.write(`environment-photos/${file.filename}`, currentFile);
+				await s3Client.write(`environment-photos/${file.filename}`, currentFile);
 				console.log(`環境照片 ${file.name} 上傳成功`);
 			}),
 		);
@@ -110,66 +100,28 @@ async function handlePhotoUpload(reqFile: any, existingPhotos: any[] = []) {
 	};
 };
 
-// 清理臨時文件
-async function cleanupTempFiles(uploadedFiles: any[]) {
-	if (uploadedFiles.length === 0) return;
-
-	Promise.all(
-		uploadedFiles.map(async (file) => {
-			try {
-				const bunFile = Bun.file(file.path);
-				if (await bunFile.exists()) {
-					await bunFile.delete();
-					console.log(`成功刪除臨時文件: ${file.filename}`);
-				}
-			} catch (cleanupError) {
-				console.error(`清理臨時文件時出錯 ${file.filename}:`, cleanupError);
-			}
-		}),
-	).catch((err) => console.error("批次清理檔案時出錯:", err));
-};
-
-// 處理環境照片數據格式的輔助函數（帶 Redis 快取）
-async function formatEnvironmentPhotos(environmentPhotos: any) {
+// 處理環境照片數據
+async function formatEnvironmentPhotos(environmentPhotos: any, limit?: number) {
 	if (!environmentPhotos) return null;
 
 	if (Array.isArray(environmentPhotos)) {
-		// 確保數據庫中最多只有 3 張照片
-		const limitedPhotos = environmentPhotos.slice(0, 3);
+		// 可選擇拿 1-3 張照片，預設全部
+		const photosToProcess = limit ? environmentPhotos.slice(0, limit) : environmentPhotos;
 
-		// 使用 Redis 快取策略生成 presigned URLs
 		const photosWithUrls = await Promise.all(
-			limitedPhotos.map(async (photo: any) => {
-				try {
-					// 首先檢查 Redis 快取
-					let presignedUrl = await PresignedUrlCache.get(photo.filename);
+			photosToProcess.map(async (photo: any) => {
+				const presignedUrl = await generatePresignedUrl(`environment-photos/${photo.filename}`, 3600);
 
-					if (!presignedUrl) {
-						// 快取中沒有或即將過期，重新生成
-						presignedUrl = client.presign(`environment-photos/${photo.filename}`, {
-							expiresIn: 3600 // 1 小時
-						});
-
-						// 存入快取
-						await PresignedUrlCache.set(photo.filename, presignedUrl, 3600);
-					}
-
+				if (!presignedUrl) {
 					return {
-						originalName: photo.originalName,
-						type: photo.type,
-						filename: photo.filename,
-						size: photo.size,
-						url: presignedUrl,
-					};
-				} catch (error) {
-					console.error(`生成 presigned URL ${photo.filename} 時出錯:`, error);
-					return {
-						originalName: photo.originalName,
-						type: photo.type,
-						filename: photo.filename,
-						size: photo.size,
 						url: null,
 						error: '圖片連結生成失敗',
+					};
+				}
+				else
+				{
+					return {
+						url: presignedUrl,
 					};
 				}
 			})
@@ -276,10 +228,10 @@ router.delete("/deleteFile/:filename", authenticated, requireEmployer, async ({ 
 			.where(eq(gigs.gigId, targetGig.gigId));
 
 		// 刪除 S3 文件
-		await client.delete(`environment-photos/${filename}`);
+		await s3Client.delete(`environment-photos/${filename}`);
 
 		// 清除 Redis 快取
-		await PresignedUrlCache.delete(filename);
+		await clearPresignedUrlCache(filename);
 
 		return response.status(200).send({
 			message: `文件 ${filename} 刪除成功`,
@@ -402,6 +354,7 @@ router.get(
 					publishedAt: true,
 					unlistedAt: true,
 					isActive: true,
+					environmentPhotos: true,
 				},
 				limit: requestLimit + 1, // 多查一筆來確認是否有更多資料
 				offset: requestOffset,
@@ -411,13 +364,21 @@ router.get(
 			const hasMore = myGigs.length > requestLimit;
 			const returnGigs = hasMore ? myGigs.slice(0, requestLimit) : myGigs;
 
+			// 只取 1 張環境照片
+			const gigsWithPhotos = await Promise.all(
+				returnGigs.map(async (gig) => ({
+					...gig,
+					environmentPhotos: await formatEnvironmentPhotos(gig.environmentPhotos, 1),
+				}))
+			);
+
 			return response.status(200).send({
-				gigs: returnGigs,
+				gigs: gigsWithPhotos,
 				pagination: {
 					limit: requestLimit,
 					offset: requestOffset,
 					hasMore,
-					returned: returnGigs.length,
+					returned: gigsWithPhotos.length,
 				},
 			});
 		} catch (error) {

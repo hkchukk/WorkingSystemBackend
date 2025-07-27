@@ -118,8 +118,7 @@ router.post(
           phoneNumber,
           identificationType,
           identificationNumber,
-          employerPhoto,
-          contactInfo,
+          employerPhoto
         } = body;
 
         const existing = await dbClient.query.employers.findFirst({
@@ -177,8 +176,7 @@ router.post(
             identificationType,
             identificationNumber,
             verificationDocuments: JSON.stringify(filesInfo),
-            employerPhoto,
-            contactInfo,
+            employerPhoto
           })
           .returning();
 

@@ -96,10 +96,7 @@ export const employers = pgTable("employers", {
 
   // 5) 商家大頭照
   employerPhoto: json("employer_photo"),
-
-  // 聯繫方式 (可放電話 + email 組合)
-  contactInfo: json("contact_info"),
-
+  
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });

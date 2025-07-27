@@ -50,6 +50,13 @@
       "when": 1753057475347,
       "tag": "0006_daily_romulus",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1753587549384,
+      "tag": "0007_fearless_scrambler",
+      "breakpoints": true
     }
   ]
 }

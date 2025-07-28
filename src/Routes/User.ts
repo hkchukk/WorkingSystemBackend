@@ -4,8 +4,8 @@ import { authenticated } from "../Middleware/middleware.ts";
 import signature from "cookie-signature";
 import type IRouter from "../Interfaces/IRouter.ts";
 import dbClient from "../Client/DrizzleClient.ts";
-import { eq } from "drizzle-orm";
-import { employers, workers } from "../Schema/DatabaseSchema.ts";
+import { eq, avg, count } from "drizzle-orm";
+import { employers, workers, workerRatings, employerRatings } from "../Schema/DatabaseSchema.ts";
 import { argon2Config } from "../config.ts";
 import { hash as argon2hash } from "@node-rs/argon2";
 import validate from "@nhttp/zod";
@@ -119,7 +119,6 @@ router.post(
           identificationType,
           identificationNumber,
           employerPhoto,
-          contactInfo,
         } = body;
 
         const existing = await dbClient.query.employers.findFirst({
@@ -178,7 +177,6 @@ router.post(
             identificationNumber,
             verificationDocuments: JSON.stringify(filesInfo),
             employerPhoto,
-            contactInfo,
           })
           .returning();
 
@@ -245,7 +243,23 @@ router.get("/profile", authenticated, async ({ user, response }) => {
         console.warn(`Failed to generate presigned URL for worker ${user.workerId} photo ${profilePhoto.r2Name}`);
       }
     }
-    return { ...workerData, profilePhoto: photoUrlData };
+    
+    const ratingStats = await dbClient
+        .select({
+          totalRatings: count(workerRatings.ratingId),
+          averageRating: avg(workerRatings.ratingValue),
+        })
+        .from(workerRatings)
+        .where(eq(workerRatings.workerId, user.workerId));
+
+    return { 
+      ...workerData, 
+      profilePhoto: photoUrlData,
+      ratingStats: {
+        totalRatings: ratingStats[0]?.totalRatings || 0,
+        averageRating: ratingStats[0]?.averageRating ? Number(ratingStats[0].averageRating) : 0,
+      }
+    };
   }
 
   if (user.role === Role.EMPLOYER) {
@@ -265,8 +279,25 @@ router.get("/profile", authenticated, async ({ user, response }) => {
         console.warn(`Failed to generate presigned URL for employer ${user.employerId} photo ${employerPhoto.r2Name}`);
       }
     }
+
+    const ratingStats = await dbClient
+        .select({
+          totalRatings: count(employerRatings.ratingId),
+          averageRating: avg(employerRatings.ratingValue),
+        })
+        .from(employerRatings)
+        .where(eq(employerRatings.employerId, user.employerId));
+
     // Return verificationDocuments as is from the DB for this route; it's handled by another endpoint.
-    return { ...employerData, employerPhoto: photoUrlData, verificationDocuments };
+    return { 
+      ...employerData, 
+      employerPhoto: photoUrlData, 
+      verificationDocuments,
+      ratingStats: {
+        totalRatings: ratingStats[0]?.totalRatings || 0,
+        averageRating: ratingStats[0]?.averageRating ? Number(ratingStats[0].averageRating) : 0,
+      }
+    };
   }
 
   return response.status(400).send("Invalid role");

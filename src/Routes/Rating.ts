@@ -3,7 +3,7 @@ import { authenticated } from "../Middleware/middleware.ts";
 import { requireWorker, requireEmployer, requireApprovedEmployer } from "../Middleware/guards.ts";
 import type IRouter from "../Interfaces/IRouter.ts";
 import dbClient from "../Client/DrizzleClient.ts";
-import { eq, and, desc, sql, count, lt } from "drizzle-orm";
+import { eq, and, desc, sql, count, lt, avg } from "drizzle-orm";
 import { gigs, gigApplications, workers, employers, workerRatings, employerRatings } from "../Schema/DatabaseSchema.ts";
 import validate from "@nhttp/zod";
 import { createRatingSchema } from "../Middleware/validator.ts";
@@ -231,7 +231,7 @@ router.get("/worker/:workerId", authenticated, requireEmployer, requireApprovedE
     const ratingStats = await dbClient
       .select({
         count: count(),
-        average: sql<number>`coalesce(avg(${workerRatings.ratingValue}), 0)`,
+        average: avg(workerRatings.ratingValue),
       })
       .from(workerRatings)
       .where(eq(workerRatings.workerId, workerId));
@@ -282,11 +282,11 @@ router.get("/employer/:employerId", authenticated, requireWorker, async ({ param
       });
     }
 
-    // 使用單一查詢計算總評數和總分
+    // 使用單一查詢計算總評數和平均分
     const ratingStats = await dbClient
       .select({
         count: count(),
-        average: sql<number>`coalesce(avg(${employerRatings.ratingValue}), 0)`,
+        average: avg(employerRatings.ratingValue),
       })
       .from(employerRatings)
       .where(eq(employerRatings.employerId, employerId));

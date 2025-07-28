@@ -1,8 +1,5 @@
 import type { Handler } from "@nhttp/nhttp";
 import { Role } from "../Types/types.ts";
-import { eq } from "drizzle-orm";
-import { employers } from "../Schema/DatabaseSchema.ts";
-import dbClient from "../Client/DrizzleClient.ts";
 
 // 角色檢查 Guard 函數
 export const requireRole = (...roles: Role[]): Handler => {
@@ -32,16 +29,11 @@ export const requireEmployerOrAdmin = requireRole(Role.EMPLOYER, Role.ADMIN);
 // 商家審核狀態檢查 Guard
 export const requireApprovedEmployer: Handler = async (rev, next) => {
   try {
-    const employer = await dbClient.query.employers.findFirst({
-      where: eq(employers.employerId, rev.user.employerId),
-      columns: {
-        approvalStatus: true,
-      },
-    });
-
-    //if (!employer || employer.approvalStatus !== "approved") {
-    //  return new Response("商家尚未通過審核，無法執行此操作", { status: 403 });
-    //}
+    /*
+    if (!rev.user.approvalStatus || rev.user.approvalStatus !== "approved") {
+      return new Response("商家尚未通過審核，無法執行此操作", { status: 403 });
+    }
+    */
 
     return next();
   } catch (error) {

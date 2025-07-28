@@ -66,24 +66,29 @@ router.get("/list", authenticated, async ({ user, query, response }) => {
   }
 });
 
-// 獲取未讀通知數量
-router.get("/unread-count", authenticated, async ({ user, response }) => {
+// 獲取是否有未讀通知
+router.get("/unread", authenticated, async ({ user, response }) => {
   try {
-    const unreadCount = await dbClient.$count(notifications, and(
-      eq(notifications.receiverId, user.workerId || user.employerId || user.adminId),
-      eq(notifications.isRead, false)
-    ));
+    const unreadNotification = await dbClient.query.notifications.findFirst({
+      where: and(
+        eq(notifications.receiverId, user.workerId || user.employerId || user.adminId),
+        eq(notifications.isRead, false)
+      ),
+      columns: {
+        notificationId: true,
+      },
+    });
 
     return response.status(200).json({
       data: {
-        unreadCount,
+        hasUnread: !!unreadNotification,
       },
     });
 
   } catch (error) {
-    console.error("獲取未讀通知數量失敗:", error);
+    console.error("獲取未讀通知狀態失敗:", error);
     return response.status(500).json({
-      message: "獲取未讀通知數量失敗",
+      message: "獲取未讀通知狀態失敗",
     });
   }
 });

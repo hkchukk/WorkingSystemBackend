@@ -41,14 +41,7 @@ export const employerSignupSchema = z.object({
     .string()
     .regex(/^(09\d{8}|\+8869\d{8}|0\d{1,2}-?\d{6,8})$/, "Invalid phone number"),
   identificationType: z.enum(["businessNo", "personalId"]),
-  identificationNumber: z.string().min(5, "ID number too short"),
-  contactInfo: z
-    .object({
-      contactPerson: z.string().min(2),
-      contactEmail: z.string().email(),
-      contactPhone: z.string().min(10),
-    })
-    .optional(),
+  identificationNumber: z.string().min(5, "ID number too short")
 });
 
 export const updateWorkerProfileSchema = z.object({
@@ -78,13 +71,6 @@ export const updateEmployerProfileSchema = z.object({
   phoneNumber: z
     .string()
     .regex(/^(09\d{8}|\+8869\d{8}|0\d{1,2}-?\d{6,8})$/, "Invalid phone number")
-    .optional(),
-  contactInfo: z
-    .object({
-      contactPerson: z.string().optional(),
-      contactEmail: z.string().email().optional(),
-      contactPhone: z.string().optional(),
-    })
     .optional(),
 });
 

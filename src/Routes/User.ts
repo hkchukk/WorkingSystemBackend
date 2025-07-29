@@ -341,6 +341,10 @@ router.put("/update/profile", authenticated, async ({ body, response, request, u
 
       const validatedData = validationResult.data;
 
+      if(Object.keys(validatedData).length === 0) {
+        return response.status(400).send("No valid data provided for update");
+      }
+
       const updatedEmployer = await dbClient
         .update(employers)
         .set({ ...validatedData, updatedAt: new Date() })

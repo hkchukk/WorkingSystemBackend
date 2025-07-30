@@ -4,7 +4,7 @@ import moment from "moment";
 
 /* user route */
 export const workerSignupSchema = z.object({
-  email: z.string().email("Invalid email format"),
+  email: z.email("Invalid email format"),
   password: z
     .string()
     .min(8, "Password must be at least 8 characters")
@@ -26,7 +26,7 @@ export const workerSignupSchema = z.object({
 });
 
 export const employerSignupSchema = z.object({
-  email: z.string().email("Invalid email format"),
+  email: z.email("Invalid email format"),
   password: z
     .string()
     .min(8, "Password must be at least 8 characters")
@@ -343,7 +343,7 @@ export const updateGigSchema = z.object({
 // 申請審核驗證 Schema
 export const reviewApplicationSchema = z.object({
   status: z.enum(["approved", "rejected"], {
-    required_error: "必須選擇核准或拒絕",
+    message: "必須選擇核准或拒絕",
   }),
 });
 
@@ -386,7 +386,7 @@ export const createGroupNotificationSchema = z.object({
 });
 
 export const adminRegister = z.object({
-  email: z.string().email("Invalid email format"),
+  email: z.email("Invalid email format"),
   password: z.string().min(8, "Password must be at least 8 characters")
     .regex(/[A-Z]/, "Must contain at least one uppercase letter")
     .regex(/[a-z]/, "Must contain at least one lowercase letter")

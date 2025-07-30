@@ -2,7 +2,6 @@ import session from "express-session";
 import passport from "passport";
 import { nhttp } from "@nhttp/nhttp";
 import cors from "@nhttp/nhttp/cors";
-import Redis from "ioredis";
 import { RedisStore } from "connect-redis";
 import { initStrategy } from "./Strategies/local.ts";
 import type IRouter from "./Interfaces/IRouter.ts";
@@ -22,7 +21,7 @@ app.use(
 	session({
 		cookie: { maxAge: 60000 * 60 * 24, secure: true },
 		store: new RedisStore({
-			client: new Redis(6379, Bun.env.REDISCONTAINERNAME ?? "0.0.0.0"),
+			client: redisClient,
 			prefix: "session:",
 		}),
 		resave: false,

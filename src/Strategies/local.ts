@@ -6,6 +6,7 @@ import { employers, workers, admins } from "../Schema/DatabaseSchema.ts";
 import { verify } from "@node-rs/argon2";
 import { argon2Config } from "../config.ts";
 import { Role, type sessionUser } from "../Types/types.ts";
+import { UserCache } from "../Client/Cache/index.ts";
 
 export function initStrategy() {
   passport.serializeUser((user: sessionUser, done) => {
@@ -13,35 +14,47 @@ export function initStrategy() {
   });
 
   passport.deserializeUser(async (payload: sessionUser, done) => {
+    const cachedUser = await UserCache.getUserProfile(payload.id, payload.role);
+
+    // 嘗試從快取獲取用戶資料
+    if (cachedUser) {
+      return done(null, cachedUser);
+    }
+
     if (payload.role === Role.EMPLOYER) {
       const employer = await dbClient.query.employers.findFirst({
         where: eq(employers.employerId, payload.id),
       });
       if (!employer) {
-        return done(null, null);
+        return done(null, false);
       }
       const { password, ...remains } = employer;
-      return done(null, { ...remains, role: Role.EMPLOYER });
+      const userData = { ...remains, role: Role.EMPLOYER };
+      await UserCache.setUserProfile(payload.id, payload.role, userData);
+      return done(null, userData);
     }
     if (payload.role === Role.WORKER) {
       const worker = await dbClient.query.workers.findFirst({
         where: eq(workers.workerId, payload.id),
       });
       if (!worker) {
-        return done(null, null);
+        return done(null, false);
       }
       const { password, ...remains } = worker;
-      return done(null, { ...remains, role: Role.WORKER });
+      const userData = { ...remains, role: Role.WORKER };
+      await UserCache.setUserProfile(payload.id, payload.role, userData);
+      return done(null, userData);
     }
     if (payload.role === Role.ADMIN) {
       const admin = await dbClient.query.admins.findFirst({
         where: eq(admins.adminId, payload.id),
       });
-      if (!admin) return done(null, null);
+      if (!admin) return done(null, false);
       const { password, ...remains } = admin;
-      return done(null, { ...remains, role: Role.ADMIN });
+      const userData = { ...remains, role: Role.ADMIN };
+      await UserCache.setUserProfile(payload.id, payload.role, userData);
+      return done(null, userData);
     }
-    done(null, null);
   });
 
   passport.use(

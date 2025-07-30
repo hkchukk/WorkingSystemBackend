@@ -13,7 +13,7 @@ import { createGigSchema, updateGigSchema } from "../Middleware/validator.ts";
 import { uploadEnvironmentPhotos } from "../Middleware/uploadFile.ts";
 import moment from "moment";
 import NotificationHelper from "../Utils/NotificationHelper.ts";
-import { s3Client, generatePresignedUrl, clearPresignedUrlCache, cleanupTempFiles } from "../Utils/FileUtils.ts";
+import { FileManager, s3Client, GigCache } from "../Client/Cache/index.ts";
 
 const router = new Router();
 
@@ -42,7 +42,7 @@ async function handlePhotoUpload(reqFile: any, existingPhotos: any[] = []) {
 	if (totalAfterAdd > 3) {
 		const canAdd = 3 - existingPhotos.length;
 		if (canAdd <= 0) {
-			cleanupTempFiles(files);
+			FileManager.cleanupTempFiles(files);
 			return {
 				environmentPhotosInfo: existingPhotos,
 				uploadedFiles: [],
@@ -53,7 +53,7 @@ async function handlePhotoUpload(reqFile: any, existingPhotos: any[] = []) {
 		}
 		uploadedFiles = files.slice(0, canAdd);
 		const rejectedFiles = files.slice(canAdd);
-		cleanupTempFiles(rejectedFiles);
+		FileManager.cleanupTempFiles(rejectedFiles);
 		message = `只能添加${canAdd}張照片，已忽略多餘的${files.length - canAdd}張`;
 	} else {
 		message = `成功添加${files.length}張照片`;
@@ -110,7 +110,7 @@ async function formatEnvironmentPhotos(environmentPhotos: any, limit?: number) {
 
 		const photosWithUrls = await Promise.all(
 			photosToProcess.map(async (photo: any) => {
-				const presignedUrl = await generatePresignedUrl(`environment-photos/${photo.filename}`, 3600);
+				const presignedUrl = await FileManager.getPresignedUrl(`environment-photos/${photo.filename}`);
 
 				if (!presignedUrl) {
 					return {
@@ -231,7 +231,7 @@ router.delete("/deleteFile/:filename", authenticated, requireEmployer, async ({ 
 		await s3Client.delete(`environment-photos/${filename}`);
 
 		// 清除 Redis 快取
-		await clearPresignedUrlCache(filename);
+		await FileManager.deleteCache(filename);
 
 		return response.status(200).send({
 			message: `文件 ${filename} 刪除成功`,
@@ -299,7 +299,7 @@ router.post(
 
 			return response.status(500).send("伺服器內部錯誤");
 		} finally {
-			cleanupTempFiles(uploadedFiles);
+			FileManager.cleanupTempFiles(uploadedFiles);
 		}
 	},
 );
@@ -591,7 +591,7 @@ router.put(
 
 			return response.status(500).send("伺服器內部錯誤");
 		} finally {
-			cleanupTempFiles(uploadedFiles);
+			FileManager.cleanupTempFiles(uploadedFiles);
 		}
 	},
 );
@@ -739,6 +739,16 @@ router.get("/public/", async ({ query, response }) => {
 		const minRateFilter = minRate ? Number.parseInt(minRate) : null;
 		const maxRateFilter = maxRate ? Number.parseInt(maxRate) : null;
 
+		// 生成快取鍵
+		const filters = `public_testing`;
+		
+		// 檢查快取
+		let cachedData = await GigCache.getGigList(filters, requestPage);
+
+		if (cachedData) {
+			return response.status(200).json(cachedData);
+		}
+
 		// 處理日期邏輯
 		const today = moment().format("YYYY-MM-DD");
 		const searchDateStart = dateStart || today;
@@ -777,7 +787,7 @@ router.get("/public/", async ({ query, response }) => {
 		const hasMore = availableGigs.length > requestLimit;
 		hasMore ? availableGigs.pop() : null;
 
-		return response.status(200).send({
+		const response_data = {
 			gigs: availableGigs,
 			pagination: {
 				limit: requestLimit,
@@ -792,7 +802,10 @@ router.get("/public/", async ({ query, response }) => {
 				maxRate: maxRateFilter,
 				dateStart: searchDateStart,
 			},
-		});
+		};
+
+		await GigCache.setGigList(filters, requestPage, response_data);
+		return response.status(200).send(response_data);
 	} catch (error) {
 		console.error("獲取工作列表時出錯:", error);
 		return response.status(500).send("伺服器內部錯誤");

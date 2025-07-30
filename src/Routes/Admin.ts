@@ -11,6 +11,8 @@ import { hash } from "@node-rs/argon2";
 import { argon2Config } from "../config";
 import { emailClient } from "../Client/EmailClient";
 import NotificationHelper from "../Utils/NotificationHelper.ts";
+import { UserCache } from "../Client/Cache/index.ts";
+import { Role } from "../Types/types.ts";
 
 const router = new Router();
 
@@ -65,6 +67,8 @@ router.patch(
 			subject: "",
 			text: ""
 		})
+
+		await UserCache.clearUserProfile(employerFound.employerId, Role.EMPLOYER);
 		return updatedEmployer[0];
 	},
 );

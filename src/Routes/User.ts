@@ -19,7 +19,7 @@ import {
 } from "../Middleware/validator.ts";
 import { uploadDocument, uploadProfilePhoto } from "../Middleware/uploadFile.ts";
 import { Role } from "../Types/types.ts";
-import { s3Client, generatePresignedUrl, cleanupTempFiles } from "../Utils/FileUtils.ts";
+import { s3Client, FileManager, RatingCache, UserCache } from "../Client/Cache/index.ts";
 
 const router = new Router();
 
@@ -204,20 +204,20 @@ router.post(
       console.error("Error in register/employee:", error);
       return response.status(500).send("Internal server error");
     } finally {
-      cleanupTempFiles(files);
+      FileManager.cleanupTempFiles(files);
     }
   },
 );
 
 router.post("/login", (rev, next) => {
-  passport.authenticate("local", (error,user,info) => {
+  passport.authenticate("local", (error: any, user: any, info: any) => {
     if (error) return next(error);
     if (!user) {
       console.error("Authentication failed:", info);
       return rev.response.status(401).send(info?.message || "Authentication failed");
     }
 
-    rev.logIn(user, (err) => {
+    rev.logIn(user, (err: any) => {
       if (err) return next(err);
 
       rev.response.cookie(
@@ -230,9 +230,26 @@ router.post("/login", (rev, next) => {
   })(rev, next);
 });
 
-router.get("/logout", ({ response, session }) => {
-  session.destroy();
-  return response.status(200).send("Logged out successfully");
+router.get("/logout", (rev) => {
+  rev.logout((err: any) => {
+    if (err) {
+      return rev.response.status(200).send("Logout error" + err);
+    }
+
+    if (rev.user) {
+      if (rev.user.role === Role.WORKER) UserCache.clearUserProfile(rev.user.workerId, Role.WORKER);
+      if (rev.user.role === Role.EMPLOYER) UserCache.clearUserProfile(rev.user.employerId, Role.EMPLOYER);
+      if (rev.user.role === Role.ADMIN) UserCache.clearUserProfile(rev.user.adminId, Role.ADMIN);
+    }
+
+    rev.session.destroy();
+    rev.response.cookie("connect.sid", "", {
+      expires: new Date(0),
+      maxAge: 0,
+    });
+
+    return rev.response.status(200).send("Logged out successfully");
+  });
 });
 
 router.get("/profile", authenticated, async ({ user, response }) => {
@@ -241,7 +258,7 @@ router.get("/profile", authenticated, async ({ user, response }) => {
     let photoUrlData = null;
 
     if (profilePhoto?.r2Name) {
-      const url = await generatePresignedUrl(`profile-photos/workers/${profilePhoto.r2Name}`);
+      const url = await FileManager.getPresignedUrl(`profile-photos/workers/${profilePhoto.r2Name}`);
       if (url) {
         photoUrlData = {
           url: url,
@@ -254,7 +271,11 @@ router.get("/profile", authenticated, async ({ user, response }) => {
       }
     }
     
-    const ratingStats = await dbClient
+    // 使用快取獲取評價統計
+    let ratingStats = await RatingCache.getRatingStats(user.workerId, Role.WORKER);
+
+    if (!ratingStats) {
+      const dbRatingStats = await dbClient
         .select({
           totalRatings: count(workerRatings.ratingId),
           averageRating: avg(workerRatings.ratingValue),
@@ -262,13 +283,18 @@ router.get("/profile", authenticated, async ({ user, response }) => {
         .from(workerRatings)
         .where(eq(workerRatings.workerId, user.workerId));
 
+      ratingStats = {
+        totalRatings: dbRatingStats[0]?.totalRatings || 0,
+        averageRating: dbRatingStats[0]?.averageRating ? Number(dbRatingStats[0].averageRating) : 0,
+      };
+
+      await RatingCache.setRatingStats(user.workerId, Role.WORKER, ratingStats);
+    }
+
     return { 
       ...workerData, 
       profilePhoto: photoUrlData,
-      ratingStats: {
-        totalRatings: ratingStats[0]?.totalRatings || 0,
-        averageRating: ratingStats[0]?.averageRating ? Number(ratingStats[0].averageRating) : 0,
-      }
+      ratingStats
     };
   }
 
@@ -277,7 +303,7 @@ router.get("/profile", authenticated, async ({ user, response }) => {
     let photoUrlData = null;
 
     if (employerPhoto?.r2Name) {
-      const url = await generatePresignedUrl(`profile-photos/employers/${employerPhoto.r2Name}`);
+      const url = await FileManager.getPresignedUrl(`profile-photos/employers/${employerPhoto.r2Name}`);
       if (url) {
         photoUrlData = {
           url: url,
@@ -290,7 +316,11 @@ router.get("/profile", authenticated, async ({ user, response }) => {
       }
     }
 
-    const ratingStats = await dbClient
+    // 使用快取獲取評價統計
+    let ratingStats = await RatingCache.getRatingStats(user.employerId, Role.EMPLOYER);
+
+    if (!ratingStats) {
+      const dbRatingStats = await dbClient
         .select({
           totalRatings: count(employerRatings.ratingId),
           averageRating: avg(employerRatings.ratingValue),
@@ -298,15 +328,20 @@ router.get("/profile", authenticated, async ({ user, response }) => {
         .from(employerRatings)
         .where(eq(employerRatings.employerId, user.employerId));
 
+      ratingStats = {
+        totalRatings: dbRatingStats[0]?.totalRatings || 0,
+        averageRating: dbRatingStats[0]?.averageRating ? Number(dbRatingStats[0].averageRating) : 0,
+      };
+
+      await RatingCache.setRatingStats(user.employerId, Role.EMPLOYER, ratingStats);
+    }
+
     // Return verificationDocuments as is from the DB for this route; it's handled by another endpoint.
     return { 
       ...employerData, 
       employerPhoto: photoUrlData, 
       verificationDocuments,
-      ratingStats: {
-        totalRatings: ratingStats[0]?.totalRatings || 0,
-        averageRating: ratingStats[0]?.averageRating ? Number(ratingStats[0].averageRating) : 0,
-      }
+      ratingStats
     };
   }
 
@@ -336,6 +371,7 @@ router.put("/update/profile", authenticated, async ({ body, response, request, u
         .returning();
 
       const { password, ...workerData } = updatedWorker[0];
+      await UserCache.clearUserProfile(user.workerId, Role.WORKER);
       return response.status(200).json(workerData);
 
     }
@@ -366,6 +402,7 @@ router.put("/update/profile", authenticated, async ({ body, response, request, u
       }
 
       const { password: empPassword, ...employerData } = updatedEmployer[0];
+      await UserCache.clearUserProfile(user.employerId, Role.EMPLOYER);
       return response.status(200).json(employerData);
 
     }
@@ -516,6 +553,7 @@ router.put(
           })
           .where(eq(employers.employerId, user.employerId));
 
+        await UserCache.clearUserProfile(user.employerId, Role.EMPLOYER);
         return response.status(200).send("Identification updated successfully");
       }
       return response.status(400).send("Invalid user role for identification update");
@@ -525,7 +563,7 @@ router.put(
       return response.status(500).send("Internal server error");
     }
     finally {
-      cleanupTempFiles(files);
+      FileManager.cleanupTempFiles(files);
     }
   }
 );
@@ -571,6 +609,8 @@ router.put(
               updatedAt: new Date(),
             })
             .where(eq(workers.workerId, user.workerId));
+
+          await UserCache.clearUserProfile(user.workerId, Role.WORKER);
           return response.status(200).send("Profile photo deleted successfully");
         }
         
@@ -605,6 +645,8 @@ router.put(
             updatedAt: new Date(),
           })
           .where(eq(employers.employerId, user.employerId));
+
+        await UserCache.clearUserProfile(user.employerId, Role.EMPLOYER);
         return response.status(200).send("Profile photo deleted successfully");
       }
         if (user.employerPhoto?.r2Name) {
@@ -633,7 +675,7 @@ router.put(
       return response.status(500).send("Internal server error");
     } finally {
       if( reqFile.profilePhoto ){
-        cleanupTempFiles([reqFile.profilePhoto]);
+        FileManager.cleanupTempFiles([reqFile.profilePhoto]);
       }
     }
   }
@@ -662,7 +704,7 @@ router.get("/employer/verification-documents", authenticated, async ({ user, res
       documentsArray.map(async (doc: any) => {
         if (doc?.r2Name && employer.identificationType) {
           const filePath = `documents/${employer.identificationType}/${doc.r2Name}`;
-          const url = await generatePresignedUrl(filePath);
+          const url = await FileManager.getPresignedUrl(filePath);
           if (url) {
             return {
               originalName: doc.originalName,

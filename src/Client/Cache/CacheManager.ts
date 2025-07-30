@@ -41,17 +41,46 @@ export class CacheManager {
 	}
 
 	/**
+	 * 獲取符合的所有鍵
+	 */
+	static async getKeys(pattern: string): Promise<string[]> {
+		try {
+			const keys: string[] = [];
+			let cursor = '0';
+			
+			do {
+				const result = await redisClient.scan(cursor, 'MATCH', pattern, 'COUNT', 100);
+				cursor = result[0];
+				keys.push(...result[1]);
+			} while (cursor !== '0');
+			
+			return keys;
+		} catch (error) {
+			console.error(`獲取鍵失敗 ${pattern}:`, error);
+			return [];
+		}
+	}
+
+	/**
 	 * 刪除符合的所有快取
 	 */
 	static async deletePattern(pattern: string): Promise<void> {
 		try {
-			const keys = await redisClient.keys(pattern);
+			const keys: string[] = [];
+			let cursor = '0';
+			
+			do {
+				const result = await redisClient.scan(cursor, 'MATCH', pattern, 'COUNT', 100);
+				cursor = result[0];
+				keys.push(...result[1]);
+			} while (cursor !== '0');
+			
 			if (keys.length > 0) {
 				await redisClient.unlink(...keys);
 				console.log(`已刪除 ${keys.length} 個快取項目: ${pattern}`);
 			}
 		} catch (error) {
-			console.error(`刪除模式快取失敗 ${pattern}:`, error);
+			console.error(`刪除快取失敗 ${pattern}:`, error);
 		}
 	}
 

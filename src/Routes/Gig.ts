@@ -739,8 +739,9 @@ router.get("/public/", async ({ query, response }) => {
 		const minRateFilter = minRate ? Number.parseInt(minRate) : null;
 		const maxRateFilter = maxRate ? Number.parseInt(maxRate) : null;
 
+		/*
 		// 生成快取鍵
-		const filters = `public_testing`;
+		const filters = `public_${city || "all"}_${district || "all"}_${minRateFilter || "any"}_${maxRateFilter || "any"}_${dateStart || "any"}`;
 		
 		// 檢查快取
 		let cachedData = await GigCache.getGigList(filters, requestPage);
@@ -748,6 +749,7 @@ router.get("/public/", async ({ query, response }) => {
 		if (cachedData) {
 			return response.status(200).json(cachedData);
 		}
+		*/
 
 		// 處理日期邏輯
 		const today = moment().format("YYYY-MM-DD");
@@ -804,7 +806,7 @@ router.get("/public/", async ({ query, response }) => {
 			},
 		};
 
-		await GigCache.setGigList(filters, requestPage, response_data);
+		//await GigCache.setGigList(filters, requestPage, response_data);
 		return response.status(200).send(response_data);
 	} catch (error) {
 		console.error("獲取工作列表時出錯:", error);

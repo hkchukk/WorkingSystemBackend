@@ -9,7 +9,7 @@ import {
   updateEmployerProfileSchema,
   updatePasswordSchema,
 } from "../Types/zodSchema";
-import { authenticate, authenticated } from "../Middleware/authentication";
+import { authenticate, authenticated, deserializeUser } from "../Middleware/authentication";
 import { uploadDocument, uploadProfilePhoto } from "../Middleware/fileUpload";
 import type IRouter from "../Interfaces/IRouter";
 import dbClient from "../Client/DrizzleClient";
@@ -190,20 +190,29 @@ router.post("/register/employer", uploadDocument, zValidator("json", employerSig
   }
 });
 
-router.post("/login", zValidator("json", loginSchema), async (c) => {
-  // 檢查是否已經登入
+router.post("/login", zValidator("json", loginSchema), authenticate, async (c) => {
+  // 認證成功後，獲取用戶資料
   const session = c.get("session");
-  if (session && session.get("id")) {
-    return c.text("已經登入，請先登出", 400);
+  const user = await deserializeUser(session);
+
+  if (!user) {
+    return c.text("登入失敗", 401);
   }
 
-  // 執行認證
-  await authenticate(c, async () => {
-    // 認證成功後的處理在 authenticate 中間件中完成
+  return c.json({
+    message: "登入成功",
+    user: {
+      id: user.userId,
+      role: user.role,
+      email: user.email,
+      ...(user.role === Role.WORKER ? {
+        firstName: user.firstName,
+        lastName: user.lastName
+      } : {
+        employerName: user.employerName
+      })
+    }
   });
-
-  const userSession = c.get("session");
-  return c.json({ user: userSession });
 });
 
 router.get("/logout", async (c) => {
@@ -225,10 +234,6 @@ router.get("/logout", async (c) => {
 
   // 刪除會話
   session.deleteSession();
-
-  // 清除 cookie
-  c.header("Set-Cookie", "connect.sid=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT; HttpOnly; SameSite=Lax");
-
   return c.text("Logged out successfully");
 });
 

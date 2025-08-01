@@ -35,7 +35,7 @@ export const requireEmployerOrAdmin = requireRole(Role.EMPLOYER, Role.ADMIN);
 // 商家審核狀態檢查 Guard
 export const requireApprovedEmployer = createMiddleware<HonoGenericContext>(async (c, next) => {
   try {
-    const user = c.get("user").role;
+    const session = c.get("session");
     
     /*
     if (!employer.length || employer[0].approvalStatus !== "approved") {

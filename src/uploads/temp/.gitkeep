@@ -1,1 +1,2 @@
-# This folder use to keep temporary file uploaded by users.
+# This file forces Git to preserve the 'uploads/verficationDocument/' directory.
+# employee-uploaded temporary files will be stored here (ignored by Git via .gitignore).

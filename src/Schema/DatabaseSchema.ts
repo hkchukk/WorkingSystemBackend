@@ -9,7 +9,7 @@ import {
   date,
 } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
-import { nanoid } from "@sitnik/nanoid";
+import { nanoid } from "nanoid";
 
 // ========== 1. 打工者表（Workers） ==========
 export const workers = pgTable("workers", {

@@ -1,24 +1,25 @@
-import { Router } from "@nhttp/nhttp";
-import { authenticated } from "../Middleware/middleware.ts";
+import { Hono } from "hono";
+import { authenticated } from "../Middleware/authentication";
 import {
   requireWorker,
   requireEmployer,
   requireApprovedEmployer
-} from "../Middleware/guards.ts";
-import type IRouter from "../Interfaces/IRouter.ts";
-import dbClient from "../Client/DrizzleClient.ts";
+} from "../Middleware/guards";
+import type IRouter from "../Interfaces/IRouter";
+import type { HonoGenericContext } from "../Types/types";
+import dbClient from "../Client/DrizzleClient";
 import { eq, and, desc, or, lte, sql, gte } from "drizzle-orm";
 import {
   gigs,
   gigApplications,
   employers,
-} from "../Schema/DatabaseSchema.ts";
-import validate from "@nhttp/zod";
-import { reviewApplicationSchema } from "../Middleware/validator.ts";
+} from "../Schema/DatabaseSchema";
+import { zValidator } from "@hono/zod-validator";
+import { reviewApplicationSchema } from "../Types/zodSchema";
 import moment from "moment";
-import NotificationHelper from "../Utils/NotificationHelper.ts";
+import NotificationHelper from "../Utils/NotificationHelper";
 
-const router = new Router();
+const router = new Hono<HonoGenericContext>();
 
 // ========== Worker 相關路由 ==========
 
@@ -30,9 +31,10 @@ router.post(
   "/apply/:gigId",
   authenticated,
   requireWorker,
-  async ({ user, params, response }) => {
+  async (c) => {
     try {
-      const { gigId } = params;
+      const user = c.get("user");
+      const gigId = c.req.param("gigId");
       const currentDate = moment().set({ hour: 0, minute: 0, second: 0, millisecond: 0 });
       const gig = await dbClient.query.gigs.findFirst({
         where: and(
@@ -45,9 +47,9 @@ router.post(
       });
 
       if (!gig) {
-        return response.status(404).send({
+        return c.json({
           message: "工作不存在、已過期或已下架",
-        });
+        }, 404);
       }
 
       // 檢查是否已經申請過這個工作（只有 pending 和 approved 狀態算作已申請）
@@ -61,10 +63,10 @@ router.post(
 
       if (existingApplication) {
         const statusText = existingApplication.status === "pending" ? "待審核" : "已核准";
-        return response.status(400).send({
+        return c.json({
           message: `您已經申請過這個工作（${statusText}）`,
           applicationStatus: existingApplication.status,
-        });
+        }, 400);
       }
 
       // 創建申請記錄
@@ -84,7 +86,7 @@ router.post(
         gig.title
       );
 
-      return response.status(201).send({
+      return c.json({
         message: "申請提交成功，等待商家審核",
         data: {
           applicationId: newApplication[0].applicationId,
@@ -92,14 +94,14 @@ router.post(
           status: "pending",
           appliedAt: newApplication[0].createdAt,
         },
-      });
+      }, 201);
 
     } catch (error) {
       console.error("申請工作時發生錯誤:", error);
-      return response.status(500).send({
+      return c.json({
         message: "申請工作失敗",
         error: error instanceof Error ? error.message : "未知錯誤",
-      });
+      }, 500);
     }
   }
 );
@@ -108,9 +110,10 @@ router.post(
  * Worker 取消申請
  * POST /application/cancel/:applicationId
  */
-router.post("/cancel/:applicationId", authenticated, requireWorker, async ({ user, params, response }) => {
+router.post("/cancel/:applicationId", authenticated, requireWorker, async (c) => {
   try {
-    const { applicationId } = params;
+    const user = c.get("user");
+    const applicationId = c.req.param("applicationId");
 
     // 查找申請記錄
     const application = await dbClient.query.gigApplications.findFirst({
@@ -121,16 +124,16 @@ router.post("/cancel/:applicationId", authenticated, requireWorker, async ({ use
     });
 
     if (!application) {
-      return response.status(404).send({
+      return c.json({
         message: "申請記錄不存在",
-      });
+      }, 404);
     }
 
     // 只有 pending 狀態的申請可以取消
     if (application.status !== "pending") {
-      return response.status(400).send({
+      return c.json({
         message: `無法取消 ${application.status === "approved" ? "已核准" : "已拒絕"} 的申請`,
-      });
+      }, 400);
     }
 
     // 更新申請狀態為 cancelled
@@ -142,20 +145,20 @@ router.post("/cancel/:applicationId", authenticated, requireWorker, async ({ use
       })
       .where(eq(gigApplications.applicationId, applicationId));
 
-    return response.status(200).send({
+    return c.json({
       message: "申請已成功取消",
       data: {
         applicationId: applicationId,
         status: "cancelled",
       },
-    });
+    }, 200);
 
   } catch (error) {
     console.error("取消申請時發生錯誤:", error);
-    return response.status(500).send({
+    return c.json({
       message: "取消申請失敗",
       error: error instanceof Error ? error.message : "未知錯誤",
-    });
+    }, 500);
   }
 });
 
@@ -163,15 +166,18 @@ router.post("/cancel/:applicationId", authenticated, requireWorker, async ({ use
  * Worker 查看自己的申請記錄
  * GET /application/my-applications
  */
-router.get("/my-applications", authenticated, requireWorker, async ({ user, query, response }) => {
+router.get("/my-applications", authenticated, requireWorker, async (c) => {
   try {
-    const { status, limit = 10, offset = 0 } = query;
+    const user = c.get("user");
+    const status = c.req.query("status");
+    const limit = c.req.query("limit") || "10";
+    const offset = c.req.query("offset") || "0";
 
     // 建立查詢條件
     const whereConditions = [eq(gigApplications.workerId, user.workerId)];
 
     if (status && ["pending", "approved", "rejected", "cancelled"].includes(status)) {
-      whereConditions.push(eq(gigApplications.status, status));
+      whereConditions.push(eq(gigApplications.status, status as "pending" | "approved" | "rejected" | "cancelled"));
     }
 
     const requestLimit = Number.parseInt(limit);
@@ -196,7 +202,7 @@ router.get("/my-applications", authenticated, requireWorker, async ({ user, quer
     const hasMore = applications.length > requestLimit;
     const actualApplications = hasMore ? applications.slice(0, requestLimit) : applications;
 
-    return response.status(200).send({
+    return c.json({
       message: "獲取申請記錄成功",
       data: {
         applications: actualApplications.map(app => ({
@@ -217,14 +223,14 @@ router.get("/my-applications", authenticated, requireWorker, async ({ user, quer
           returned: actualApplications.length,
         },
       },
-    });
+    }, 200);
 
   } catch (error) {
     console.error("查看申請記錄時發生錯誤:", error);
-    return response.status(500).send({
+    return c.json({
       message: "獲取申請記錄失敗",
       error: error instanceof Error ? error.message : "未知錯誤",
-    });
+    }, 500);
   }
 });
 
@@ -232,23 +238,22 @@ router.get("/my-applications", authenticated, requireWorker, async ({ user, quer
  * Worker 行事曆 - 查看已核准的工作行程
  * GET /application/worker/calendar
  */
-router.get("/worker/calendar", authenticated, requireWorker, async ({ user, query, response }) => {
+router.get("/worker/calendar", authenticated, requireWorker, async (c) => {
   try {
-    const {
-      year,
-      month,
-      dateStart,
-      dateEnd
-    } = query;
+    const user = c.get("user");
+    const year = c.req.query("year");
+    const month = c.req.query("month");
+    const dateStart = c.req.query("dateStart");
+    const dateEnd = c.req.query("dateEnd");
 
     // 檢查是否提供了必要的日期參數
     const hasYearMonth = year && month;
     const hasDateRange = dateStart || dateEnd;
 
     if (!hasYearMonth && !hasDateRange) {
-      return response.status(400).send({
+      return c.json({
         error: "必須提供年月參數 (year, month) 或日期範圍參數 (dateStart, dateEnd)"
-      });
+      }, 400);
     }
 
     // 建立基本查詢條件
@@ -264,9 +269,9 @@ router.get("/worker/calendar", authenticated, requireWorker, async ({ user, quer
       const monthNum = Number.parseInt(month);
 
       if (yearNum < 2020 || yearNum > 2050 || monthNum < 1 || monthNum > 12) {
-        return response.status(400).send({
+        return c.json({
           error: "年份必須在 2020-2050 之間，月份必須在 1-12 之間"
-        });
+        }, 400);
       }
 
       const startDate = moment(`${yearNum}-${monthNum.toString().padStart(2, '0')}-01`).format('YYYY-MM-DD');
@@ -332,7 +337,7 @@ router.get("/worker/calendar", authenticated, requireWorker, async ({ user, quer
       };
     });
 
-    return response.status(200).send({
+    return c.json({
       message: "獲取 Worker 行事曆成功",
       data: {
         gigs: calendarGigs,
@@ -344,14 +349,14 @@ router.get("/worker/calendar", authenticated, requireWorker, async ({ user, quer
           dateEnd: dateEnd || null,
         }
       }
-    });
+    }, 200);
 
   } catch (error) {
     console.error("獲取 Worker 行事曆時發生錯誤:", error);
-    return response.status(500).send({
+    return c.json({
       message: "獲取 Worker 行事曆失敗",
       error: error instanceof Error ? error.message : "未知錯誤",
-    });
+    }, 500);
   }
 });
 
@@ -361,10 +366,13 @@ router.get("/worker/calendar", authenticated, requireWorker, async ({ user, quer
  * Employer 查看工作申請詳情
  * GET /application/gig/:gigId
  */
-router.get("/gig/:gigId", authenticated, requireEmployer, requireApprovedEmployer, async ({ user, params, query, response }) => {
+router.get("/gig/:gigId", authenticated, requireEmployer, requireApprovedEmployer, async (c) => {
   try {
-    const { gigId } = params;
-    const { status, limit = 10, offset = 0 } = query;
+    const user = c.get("user");
+    const gigId = c.req.param("gigId");
+    const status = c.req.query("status");
+    const limit = c.req.query("limit") || "10";
+    const offset = c.req.query("offset") || "0";
 
     // 檢查工作權限
     const gig = await dbClient.query.gigs.findFirst({
@@ -372,16 +380,16 @@ router.get("/gig/:gigId", authenticated, requireEmployer, requireApprovedEmploye
     });
 
     if (!gig) {
-      return response.status(404).send({
+      return c.json({
         message: "工作不存在或無權限查看",
-      });
+      }, 404);
     }
 
     const whereConditions = [eq(gigApplications.gigId, gigId)];
 
     // 單一狀態過濾：?status=pending 或不傳參數顯示全部
     if (status && ["pending", "approved", "rejected", "cancelled"].includes(status)) {
-      whereConditions.push(eq(gigApplications.status, status));
+      whereConditions.push(eq(gigApplications.status, status as "pending" | "approved" | "rejected" | "cancelled"));
     }
 
     const requestLimit = Number.parseInt(limit);
@@ -405,7 +413,7 @@ router.get("/gig/:gigId", authenticated, requireEmployer, requireApprovedEmploye
     // 計算統計資訊
     // 按工作分組統計
 
-    return response.status(200).send({
+    return c.json({
       message: "獲取工作申請列表成功",
       data: {
         gigTitle: gig.title,
@@ -428,14 +436,14 @@ router.get("/gig/:gigId", authenticated, requireEmployer, requireApprovedEmploye
           returned: actualApplications.length,
         },
       },
-    });
+    }, 200);
 
   } catch (error) {
     console.error("查看工作申請時發生錯誤:", error);
-    return response.status(500).send({
+    return c.json({
       message: "獲取工作申請列表失敗",
       error: error instanceof Error ? error.message : "未知錯誤",
-    });
+    }, 500);
   }
 });
 
@@ -448,11 +456,12 @@ router.put(
   authenticated,
   requireEmployer,
   requireApprovedEmployer,
-  validate(reviewApplicationSchema),
-  async ({ user, params, body, response }) => {
+  zValidator("json", reviewApplicationSchema),
+  async (c) => {
     try {
-      const { applicationId } = params;
-      const { status } = body;
+      const user = c.get("user");
+      const applicationId = c.req.param("applicationId");
+      const { status } = c.req.valid("json");
 
       // 查找申請記錄
       const application = await dbClient.query.gigApplications.findFirst({
@@ -463,39 +472,39 @@ router.put(
       });
 
       if (!application) {
-        return response.status(404).send({
+        return c.json({
           message: "申請記錄不存在",
-        });
+        }, 404);
       }
 
       // 檢查工作是否屬於該商家
       if (application.gig.employerId !== user.employerId) {
-        return response.status(403).send({
+        return c.json({
           message: "您無權審核此申請",
-        });
+        }, 403);
       }
 
       // 檢查工作是否仍然有效
       if (!application.gig.isActive) {
-        return response.status(400).send({
+        return c.json({
           message: "此工作已停用，無法審核申請",
-        });
+        }, 400);
       }
 
       // 檢查工作是否已過期
       const currentDate = moment().format('YYYY-MM-DD');
       if (application.gig.dateEnd && application.gig.dateEnd < currentDate) {
-        return response.status(400).send({
+        return c.json({
           message: "此工作已過期，無法審核申請",
-        });
+        }, 400);
       }
 
       // 只有 pending 狀態的申請可以審核
       if (application.status !== "pending") {
-        return response.status(400).send({
+        return c.json({
           message: "此申請已經處理過了",
           currentStatus: application.status,
-        });
+        }, 400);
       }
 
       // 更新申請狀態
@@ -519,37 +528,40 @@ router.put(
           application.workerId,
           application.gig.title,
           user.employerName,
-          body.reason // 如果有拒絕原因的話
+          undefined // 如果有拒絕原因的話
         );
       }
 
       const statusText = status === "approved" ? "核准" : "拒絕";
 
-      return response.status(200).send({
+      return c.json({
         message: `申請已${statusText}`,
         data: {
           applicationId: applicationId,
           status: status,
         },
-      });
+      }, 200);
 
     } catch (error) {
       console.error("審核申請時發生錯誤:", error);
-      return response.status(500).send({
+      return c.json({
         message: "審核申請失敗",
         error: error instanceof Error ? error.message : "未知錯誤",
-      });
+      }, 500);
     }
   }
 );
 
 /**
  * Employer 查看所有工作的申請
- * GET /application/gig/all
+ * GET /application/gig/all/
  */
-router.get("/gig/all", authenticated, requireEmployer, requireApprovedEmployer, async ({ user, query, response }) => {
+router.get("/gig/all/", authenticated, requireEmployer, requireApprovedEmployer, async (c) => {
   try {
-    const { status, limit = 10, offset = 0 } = query;
+    const user = c.get("user");
+    const status = c.req.query("status");
+    const limit = c.req.query("limit") || "10";
+    const offset = c.req.query("offset") || "0";
 
     // 先查詢該商家的所有工作 ID
     const userGigs = await dbClient.query.gigs.findMany({
@@ -561,9 +573,9 @@ router.get("/gig/all", authenticated, requireEmployer, requireApprovedEmployer, 
 
     if (userGigIds.length === 0) {
       // 如果沒有工作，直接返回空結果
-      return response.status(200).send({
+      return c.json({
         message: "沒有找到任何申請記錄",
-      });
+      }, 200);
     }
 
     // 查詢所有工作的申請記錄
@@ -573,7 +585,7 @@ router.get("/gig/all", authenticated, requireEmployer, requireApprovedEmployer, 
     let applicationStatusConditions = null;
 
     if (status && ["pending", "approved", "rejected", "cancelled"].includes(status)) {
-      applicationStatusConditions = eq(gigApplications.status, status);
+      applicationStatusConditions = eq(gigApplications.status, status as "pending" | "approved" | "rejected" | "cancelled");
     }
 
     // 建立申請查詢條件
@@ -628,7 +640,7 @@ router.get("/gig/all", authenticated, requireEmployer, requireApprovedEmployer, 
       return acc;
     }, {});
 
-    return response.status(200).send({
+    return c.json({
       message: "獲取所有申請記錄成功",
       data: {
         gigs: Object.values(gigsWithApplications),
@@ -639,14 +651,14 @@ router.get("/gig/all", authenticated, requireEmployer, requireApprovedEmployer, 
           returned: actualApplications.length,
         },
       },
-    });
+    }, 200);
 
   } catch (error) {
     console.error("查看所有申請時發生錯誤:", error);
-    return response.status(500).send({
+    return c.json({
       message: "獲取所有申請失敗",
       error: error instanceof Error ? error.message : "未知錯誤",
-    });
+    }, 500);
   }
 });
 

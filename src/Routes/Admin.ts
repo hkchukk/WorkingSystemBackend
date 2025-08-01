@@ -1,52 +1,53 @@
-import { Router } from "@nhttp/nhttp";
+import { Hono } from "hono";
 import type IRouter from "../Interfaces/IRouter";
-import { authenticated } from "../Middleware/middleware";
+import type { HonoGenericContext } from "../Types/types";
+import { authenticated } from "../Middleware/authentication";
 import { requireAdmin } from "../Middleware/guards";
 import dbClient from "../Client/DrizzleClient";
 import { eq } from "drizzle-orm";
 import { admins, employers } from "../Schema/DatabaseSchema";
-import validate from "@nhttp/zod";
-import { adminRegister } from "../Middleware/validator";
+import { zValidator } from "@hono/zod-validator";
+import { adminRegisterSchema } from "../Types/zodSchema";
 import { hash } from "@node-rs/argon2";
 import { argon2Config } from "../config";
 import { emailClient } from "../Client/EmailClient";
-import NotificationHelper from "../Utils/NotificationHelper.ts";
-import { UserCache } from "../Client/Cache/index.ts";
-import { Role } from "../Types/types.ts";
+import NotificationHelper from "../Utils/NotificationHelper";
+import { UserCache } from "../Client/Cache/Index";
+import { Role } from "../Types/types";
 
-const router = new Router();
+const router = new Hono<HonoGenericContext>();
 
-router.post("/register", validate(adminRegister), async (rev) => {
-	const { email, password } = rev.body;
+router.post("/register", zValidator("json", adminRegisterSchema), async (c) => {
+	const { email, password } = c.req.valid("json");
 	const hashedPassword = await hash(password, argon2Config);
 	const newAdmin = await dbClient
 		.insert(admins)
 		.values({ email, password: hashedPassword })
 		.returning();
-	return newAdmin[0];
+	return c.json(newAdmin[0]);
 });
 
-router.get("/pendingEmployer", authenticated, requireAdmin, async (rev) => {
+router.get("/pendingEmployer", authenticated, requireAdmin, async (c) => {
 	const pendingEmployers = await dbClient.query.employers.findMany({
 		where: eq(employers.approvalStatus, "pending"),
 	});
-	return pendingEmployers;
+	return c.json(pendingEmployers);
 });
 
 router.patch(
 	"/approveEmployer/:id",
 	authenticated,
 	requireAdmin,
-	async (rev) => {
-		const { id } = rev.params;
+	async (c) => {
+		const id = c.req.param("id");
 		const employerFound = await dbClient.query.employers.findFirst({
 			where: eq(employers.employerId, id),
 		});
 		if (!employerFound) {
-			return rev.response.status(404).send("Employer not found");
+			return c.text("Employer not found", 404);
 		}
 		if (employerFound.approvalStatus !== "pending") {
-			return rev.response.status(400).send("Employer is not pending approval");
+			return c.text("Employer is not pending approval", 400);
 		}
 		const updatedEmployer = await dbClient
 			.update(employers)
@@ -60,7 +61,7 @@ router.patch(
 			employerFound.employerName
 		);
 
-		// TODO: Fill in email details
+		// Fill in email details
 		await emailClient.sendMail({
 			from: "",
 			to: employerFound.email,
@@ -69,7 +70,7 @@ router.patch(
 		})
 
 		await UserCache.clearUserProfile(employerFound.employerId, Role.EMPLOYER);
-		return updatedEmployer[0];
+		return c.json(updatedEmployer[0]);
 	},
 );
 

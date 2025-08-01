@@ -1,19 +1,23 @@
-import { Router } from "@nhttp/nhttp";
-import { authenticated } from "../Middleware/middleware.ts";
-import type IRouter from "../Interfaces/IRouter.ts";
-import dbClient from "../Client/DrizzleClient.ts";
+import { Hono } from "hono";
+import { authenticated } from "../Middleware/authentication";
+import type IRouter from "../Interfaces/IRouter";
+import type { HonoGenericContext } from "../Types/types";
+import dbClient from "../Client/DrizzleClient";
 import { eq, and, desc, inArray } from "drizzle-orm";
-import { notifications } from "../Schema/DatabaseSchema.ts";
-import validate from "@nhttp/zod";
-import { createNotificationSchema, markAsReadSchema, createBatchNotificationSchema, createGroupNotificationSchema } from "../Middleware/validator.ts";
-import NotificationHelper from "../Utils/NotificationHelper.ts";
+import { notifications } from "../Schema/DatabaseSchema";
+import { zValidator } from "@hono/zod-validator";
+import { createNotificationSchema, markAsReadSchema, createBatchNotificationSchema, createGroupNotificationSchema } from "../Types/zodSchema";
+import NotificationHelper, { type NotificationType } from "../Utils/NotificationHelper";
 
-const router = new Router();
+const router = new Hono<HonoGenericContext>();
 
 // 獲取當前用戶的通知列表
-router.get("/list", authenticated, async ({ user, query, response }) => {
+router.get("/list", authenticated, async (c) => {
   try {
-    const { limit = 10, offset = 0, unreadOnly = false } = query;
+    const user = c.get("user");
+    const limit = c.req.query("limit") || "10";
+    const offset = c.req.query("offset") || "0";
+    const unreadOnly = c.req.query("unreadOnly") || "false";
     const requestLimit = Number.parseInt(limit);
     const requestOffset = Number.parseInt(offset);
     const isUnreadOnly = unreadOnly === "true";
@@ -46,7 +50,7 @@ router.get("/list", authenticated, async ({ user, query, response }) => {
     const hasMore = notificationList.length > requestLimit;
     const returnNotifications = hasMore ? notificationList.slice(0, requestLimit) : notificationList;
 
-    return response.status(200).json({
+    return c.json({
       data: {
         notifications: returnNotifications,
         pagination: {
@@ -56,18 +60,19 @@ router.get("/list", authenticated, async ({ user, query, response }) => {
           returned: returnNotifications.length,
         },
       },
-    });
+    }, 200);
 
   } catch (error) {
     console.error("獲取通知列表失敗:", error);
-    return response.status(500).json({
+    return c.json({
       message: "獲取通知列表失敗",
-    });
+    }, 500);
   }
 });
 
 // 獲取是否有未讀通知
-router.get("/unread", authenticated, async ({ user, response }) => {
+router.get("/unread", authenticated, async (c) => {
+    const user = c.get("user");
   try {
     const unreadNotification = await dbClient.query.notifications.findFirst({
       where: and(
@@ -79,24 +84,25 @@ router.get("/unread", authenticated, async ({ user, response }) => {
       },
     });
 
-    return response.status(200).json({
+    return c.json({
       data: {
         hasUnread: !!unreadNotification,
       },
-    });
+    }, 200);
 
   } catch (error) {
     console.error("獲取未讀通知狀態失敗:", error);
-    return response.status(500).json({
+    return c.json({
       message: "獲取未讀通知狀態失敗",
-    });
+    }, 500);
   }
 });
 
 // 標記通知為已讀
-router.put("/mark-as-read", authenticated, validate(markAsReadSchema), async ({ user, body, response }) => {
+router.put("/mark-as-read/", authenticated, zValidator("json", markAsReadSchema), async (c) => {
+    const user = c.get("user");
   try {
-    const { notificationIds } = body;
+    const { notificationIds } = c.req.valid("json");
 
     // 驗證通知是否屬於當前用戶並批量更新
     const currentDate = new Date();
@@ -114,28 +120,29 @@ router.put("/mark-as-read", authenticated, validate(markAsReadSchema), async ({ 
       .returning({ notificationId: notifications.notificationId });
 
     if (result.length === 0) {
-      return response.status(400).json({
+      return c.json({
         message: "找不到有效的通知",
-      });
+      }, 400);
     }
 
-    return response.status(200).json({
+    return c.json({
       message: `成功標記 ${result.length} 條通知為已讀`,
       data: {
         updatedCount: result.length,
       },
-    });
+    }, 200);
 
   } catch (error) {
     console.error("標記通知已讀失敗:", error);
-    return response.status(500).json({
+    return c.json({
       message: "標記通知已讀失敗",
-    });
+    }, 500);
   }
 });
 
 // 建立通知 (管理員或系統內部使用)
-router.post("/create", authenticated, validate(createNotificationSchema), async ({ body, response }) => {
+router.post("/create/", authenticated, zValidator("json", createNotificationSchema), async (c) => {
+    const body = c.req.valid("json");
   try {
     const newNotification = await dbClient
       .insert(notifications)
@@ -147,73 +154,74 @@ router.post("/create", authenticated, validate(createNotificationSchema), async 
       })
       .returning();
 
-    return response.status(201).json({
+    return c.json({
       message: "通知建立成功",
       data: newNotification[0],
-    });
+    }, 201);
 
   } catch (error) {
     console.error("建立通知失敗:", error);
-    return response.status(500).json({
+    return c.json({
       message: "建立通知失敗",
-    });
+    }, 500);
   }
 });
 
 // 批量建立通知 (管理員或系統內部使用)
-router.post("/create-batch", authenticated, validate(createBatchNotificationSchema), async ({ body, response }) => {
+router.post("/create-batch/", authenticated, zValidator("json", createBatchNotificationSchema), async (c) => {
   try {
-    const { receiverIds, title, message, type } = body;
+    const { receiverIds, title, message, type } = c.req.valid("json");
 
-    const success = await NotificationHelper.createBatch(receiverIds, { title, message, type });
+    const success = await NotificationHelper.createBatch(receiverIds, { title, message, type: type as NotificationType });
 
     if (success) {
-      return response.status(201).json({
+      return c.json({
         message: `成功建立 ${receiverIds.length} 條通知`,
         data: {
           totalCreated: receiverIds.length,
           totalRequested: receiverIds.length,
         },
-      });
+      }, 201);
     }
-    return response.status(500).json({
+    return c.json({
       message: "批量建立通知失敗",
-    });
+    }, 500);
   } catch (error) {
     console.error("批量建立通知失敗:", error);
-    return response.status(500).json({
+    return c.json({
       message: "批量建立通知失敗",
-    });
+    }, 500);
   }
 });
 
 // 發送通知給指定用戶群組 (管理員或系統內部使用)
-router.post("/create-group", authenticated, validate(createGroupNotificationSchema), async ({ body, response }) => {
+router.post("/create-group/", authenticated, zValidator("json", createGroupNotificationSchema), async (c) => {
   try {
-    const { groups, title, message, type } = body;
+    const { groups, title, message, type } = c.req.valid("json");
 
-    const success = await NotificationHelper.notifyUserGroups(groups, title, message, type);
+    const success = await NotificationHelper.notifyUserGroups(groups, title, message, type as NotificationType);
 
     if (success) {
-      return response.status(201).json({
+      return c.json({
         message: "群組通知發送成功",
-      });
+      }, 201);
     }
-    return response.status(500).json({
+    return c.json({
       message: "群組通知發送失敗",
-    });
+    }, 500);
   } catch (error) {
     console.error("發送群組通知失敗:", error);
-    return response.status(500).json({
+    return c.json({
       message: "發送群組通知失敗",
-    });
+    }, 500);
   }
 });
 
 // 刪除通知
-router.delete("/:notificationId", authenticated, async ({ user, params, response }) => {
+router.delete("/:notificationId", authenticated, async (c) => {
+    const user = c.get("user");
   try {
-    const { notificationId } = params;
+        const notificationId = c.req.param("notificationId");
 
     // 驗證通知是否屬於當前用戶
     const notification = await dbClient.query.notifications.findFirst({
@@ -224,31 +232,32 @@ router.delete("/:notificationId", authenticated, async ({ user, params, response
     });
 
     if (!notification) {
-      return response.status(404).json({
+      return c.json({
         message: "找不到該通知",
-      });
+      }, 404);
     }
 
     await dbClient
       .delete(notifications)
       .where(eq(notifications.notificationId, notificationId));
 
-    return response.status(200).json({
+    return c.json({
       message: "通知刪除成功",
-    });
+    }, 200);
 
   } catch (error) {
     console.error("刪除通知失敗:", error);
-    return response.status(500).json({
+    return c.json({
       message: "刪除通知失敗",
-    });
+    }, 500);
   }
 });
 
 // 獲取特定通知詳情
-router.get("/:notificationId", authenticated, async ({ user, params, response }) => {
+router.get("/:notificationId", authenticated, async (c) => {
+    const user = c.get("user");
   try {
-    const { notificationId } = params;
+        const notificationId = c.req.param("notificationId");
 
     const notification = await dbClient.query.notifications.findFirst({
       where: and(
@@ -258,9 +267,9 @@ router.get("/:notificationId", authenticated, async ({ user, params, response })
     });
 
     if (!notification) {
-      return response.status(404).json({
+      return c.json({
         message: "找不到該通知",
-      });
+      }, 404);
     }
 
     // 如果通知未讀，自動標記為已讀
@@ -280,15 +289,15 @@ router.get("/:notificationId", authenticated, async ({ user, params, response })
       notification.readAt = currentDate;
     }
 
-    return response.status(200).json({
+    return c.json({
       data: notification,
-    });
+    }, 200);
 
   } catch (error) {
     console.error("獲取通知詳情失敗:", error);
-    return response.status(500).json({
+    return c.json({
       message: "獲取通知詳情失敗",
-    });
+    }, 500);
   }
 });
 

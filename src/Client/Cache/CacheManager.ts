@@ -1,4 +1,4 @@
-import redisClient from "../RedisClient.ts";
+import redisClient from "../RedisClient";
 
 // 通用快取類
 export class CacheManager {

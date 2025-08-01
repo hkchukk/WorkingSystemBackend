@@ -1,11 +1,17 @@
-import type { Handler } from "@nhttp/nhttp";
-import { Role } from "../Types/types.ts";
+import { createMiddleware } from "hono/factory";
+import type { HonoGenericContext } from "../Types/types";
+import { Role } from "../Types/types";
 
 // 角色檢查 Guard 函數
-export const requireRole = (...roles: Role[]): Handler => {
-  return (rev, next) => {
+export const requireRole = (...roles: Role[]) => {
+  return createMiddleware<HonoGenericContext>(async (c, next) => {
+    const user = c.get("user");
+    
+    if (!user) {
+      return c.text("需要登入", 401);
+    }
 
-    if (!roles.includes(rev.user.role)) {
+    if (!roles.includes(user.role)) {
       const roleNames = {
         [Role.WORKER]: "打工者",
         [Role.EMPLOYER]: "商家",
@@ -13,11 +19,11 @@ export const requireRole = (...roles: Role[]): Handler => {
       };
       
       const allowedRoles = roles.map(role => roleNames[role]).join("、");
-      return new Response(`只有${allowedRoles}可以執行此操作`, { status: 403 });
+      return c.text(`只有${allowedRoles}可以執行此操作`, 403);
     }
 
-    return next();
-  };
+    await next();
+  });
 };
 
 // 角色的 Guards
@@ -27,17 +33,19 @@ export const requireAdmin = requireRole(Role.ADMIN);
 export const requireEmployerOrAdmin = requireRole(Role.EMPLOYER, Role.ADMIN);
 
 // 商家審核狀態檢查 Guard
-export const requireApprovedEmployer: Handler = async (rev, next) => {
+export const requireApprovedEmployer = createMiddleware<HonoGenericContext>(async (c, next) => {
   try {
+    const user = c.get("user").role;
+    
     /*
-    if (!rev.user.approvalStatus || rev.user.approvalStatus !== "approved") {
-      return new Response("商家尚未通過審核，無法執行此操作", { status: 403 });
+    if (!employer.length || employer[0].approvalStatus !== "approved") {
+      return c.text("商家尚未通過審核，無法執行此操作", 403);
     }
     */
-
-    return next();
+   
+    await next();
   } catch (error) {
     console.error("商家審核狀態檢查時發生錯誤:", error);
-    return new Response("商家審核狀態檢查失敗", { status: 500 });
+    return c.text("商家審核狀態檢查失敗", 500);
   }
-}; 
+});

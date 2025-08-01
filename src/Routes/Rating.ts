@@ -1,15 +1,16 @@
-import { Router } from "@nhttp/nhttp";
-import { authenticated } from "../Middleware/middleware.ts";
-import { requireWorker, requireEmployer, requireApprovedEmployer } from "../Middleware/guards.ts";
-import type IRouter from "../Interfaces/IRouter.ts";
-import dbClient from "../Client/DrizzleClient.ts";
+import { Hono } from "hono";
+import { authenticated } from "../Middleware/authentication";
+import { requireWorker, requireEmployer, requireApprovedEmployer } from "../Middleware/guards";
+import type IRouter from "../Interfaces/IRouter";
+import type { HonoGenericContext } from "../Types/types";
+import dbClient from "../Client/DrizzleClient";
 import { eq, and, desc, sql, count, lt, avg } from "drizzle-orm";
-import { gigs, gigApplications, workers, employers, workerRatings, employerRatings } from "../Schema/DatabaseSchema.ts";
-import validate from "@nhttp/zod";
-import { createRatingSchema } from "../Middleware/validator.ts";
+import { gigs, gigApplications, workers, employers, workerRatings, employerRatings } from "../Schema/DatabaseSchema";
+import { zValidator } from "@hono/zod-validator";
+import { createRatingSchema } from "../Types/zodSchema";
 import moment from "moment";
 
-const router = new Router();
+const router = new Hono<HonoGenericContext>();
 
 // ========== 商家對打工者評分（基於工作）==========
 
@@ -22,18 +23,20 @@ router.post(
   authenticated,
   requireEmployer,
   requireApprovedEmployer,
-  validate(createRatingSchema),
-  async ({ user, params, body, response }) => {
+  zValidator("json", createRatingSchema),
+  async (c) => {
     try {
-      const { gigId, workerId } = params;
-      const { ratingValue, comment } = body;
+      const user = c.get("user");
+      const gigId = c.req.param("gigId");
+      const workerId = c.req.param("workerId");
+      const { ratingValue, comment } = c.req.valid("json");
       const employerId = user.employerId;
 
       // 檢查是否已經評分過
       const existingRating = await dbClient.query.workerRatings.findFirst({
         where: and(
-          eq(workerRatings.gigId, gigId), 
-          eq(workerRatings.workerId, workerId), 
+          eq(workerRatings.gigId, gigId),
+          eq(workerRatings.workerId, workerId),
           eq(workerRatings.employerId, employerId)
         ),
         columns: {
@@ -42,9 +45,9 @@ router.post(
       });
 
       if (existingRating) {
-        return response.status(400).send({
+        return c.json({
           message: "您已經對這位打工者評分過了",
-        });
+        }, 400);
       }
 
       // 直接查詢符合所有條件的記錄，並檢查工作是否已結束
@@ -73,9 +76,9 @@ router.post(
       });
 
       if (!validGig) {
-        return response.status(404).send({
+        return c.json({
           message: "找不到可評分的工作、指定的打工者沒有已批准的申請，或工作尚未結束",
-        });
+        }, 404);
       }
 
       // 創建評分
@@ -90,7 +93,7 @@ router.post(
         })
         .returning();
 
-      return response.status(201).send({
+      return c.json({
         message: "評分成功",
         data: {
           ratingId: newRating.ratingId,
@@ -98,12 +101,12 @@ router.post(
           comment: newRating.comment,
           createdAt: newRating.createdAt,
         },
-      });
+      }, 201);
     } catch (error) {
       console.error("評分打工者時發生錯誤:", error);
-      return response.status(500).send({
+      return c.json({
         message: "評分失敗，請稍後再試",
-      });
+      }, 500);
     }
   }
 );
@@ -116,11 +119,13 @@ router.post(
   "/employer/:employerId/gig/:gigId",
   authenticated,
   requireWorker,
-  validate(createRatingSchema),
-  async ({ user, params, body, response }) => {
+  zValidator("json", createRatingSchema),
+  async (c) => {
     try {
-      const { gigId, employerId } = params;
-      const { ratingValue, comment } = body;
+      const user = c.get("user");
+      const gigId = c.req.param("gigId");
+      const employerId = c.req.param("employerId");
+      const { ratingValue, comment } = c.req.valid("json");
       const workerId = user.workerId;
 
       // 檢查是否已經評分過
@@ -136,9 +141,9 @@ router.post(
       });
 
       if (existingRating) {
-        return response.status(400).send({
+        return c.json({
           message: "您已經對這個商家評分過了",
-        });
+        }, 400);
       }
       
       // 直接查詢符合所有條件的記錄，並檢查工作是否已結束
@@ -167,9 +172,9 @@ router.post(
       });
 
       if (!validGig) {
-        return response.status(404).send({
+        return c.json({
           message: "找不到可評分的工作、您沒有此工作的已批准申請，或工作尚未結束",
-        });
+        }, 404);
       }
 
       // 創建評分
@@ -184,7 +189,7 @@ router.post(
         })
         .returning();
 
-      return response.status(201).send({
+      return c.json({
         message: "評分成功",
         data: {
           ratingId: newRating.ratingId,
@@ -192,12 +197,12 @@ router.post(
           comment: newRating.comment,
           createdAt: newRating.createdAt,
         },
-      });
+      }, 201);
     } catch (error) {
       console.error("評分商家時發生錯誤:", error);
-      return response.status(500).send({
+      return c.json({
         message: "評分失敗，請稍後再試",
-      });
+      }, 500);
     }
   }
 );
@@ -208,9 +213,9 @@ router.post(
  * 商家查看打工者的評分統計
  * GET /rating/worker/:workerId
  */
-router.get("/worker/:workerId", authenticated, requireEmployer, requireApprovedEmployer, async ({ params, response }) => {
+router.get("/worker/:workerId", authenticated, requireEmployer, requireApprovedEmployer, async (c) => {
   try {
-    const { workerId } = params;
+        const workerId = c.req.param("workerId");
 
     // 驗證打工者是否存在
     const worker = await dbClient.query.workers.findFirst({
@@ -222,9 +227,9 @@ router.get("/worker/:workerId", authenticated, requireEmployer, requireApprovedE
     });
 
     if (!worker) {
-      return response.status(404).send({
+      return c.json({
         message: "找不到指定的打工者",
-      });
+      }, 404);
     }
 
     // 使用單一查詢計算總評數和總分
@@ -239,7 +244,7 @@ router.get("/worker/:workerId", authenticated, requireEmployer, requireApprovedE
     const totalRatings = ratingStats[0].count;
     const averageRating = totalRatings > 0 ? Number(ratingStats[0].average) : 0;
 
-    return response.send({
+    return c.json({
       data: {
         worker: {
           workerId,
@@ -250,12 +255,12 @@ router.get("/worker/:workerId", authenticated, requireEmployer, requireApprovedE
           averageRating: Number(averageRating.toFixed(2)),
         },
       },
-    });
+    }, 200);
   } catch (error) {
     console.error("獲取打工者評分時發生錯誤:", error);
-    return response.status(500).send({
+    return c.json({
       message: "獲取評分失敗，請稍後再試",
-    });
+    }, 500);
   }
 });
 
@@ -263,9 +268,9 @@ router.get("/worker/:workerId", authenticated, requireEmployer, requireApprovedE
  * 打工者查看商家的評分統計
  * GET /rating/employer/:employerId
  */
-router.get("/employer/:employerId", authenticated, requireWorker, async ({ params, response }) => {
+router.get("/employer/:employerId", authenticated, requireWorker, async (c) => {
   try {
-    const { employerId } = params;
+        const employerId = c.req.param("employerId");
 
     // 驗證商家是否存在
     const employer = await dbClient.query.employers.findFirst({
@@ -277,9 +282,9 @@ router.get("/employer/:employerId", authenticated, requireWorker, async ({ param
     });
 
     if (!employer) {
-      return response.status(404).send({
+      return c.json({
         message: "找不到指定的商家",
-      });
+      }, 404);
     }
 
     // 使用單一查詢計算總評數和平均分
@@ -294,7 +299,7 @@ router.get("/employer/:employerId", authenticated, requireWorker, async ({ param
     const totalRatings = ratingStats[0].count;
     const averageRating = totalRatings > 0 ? Number(ratingStats[0].average) : 0;
 
-    return response.send({
+    return c.json({
       data: {
         employer: {
           employerId,
@@ -305,12 +310,12 @@ router.get("/employer/:employerId", authenticated, requireWorker, async ({ param
           averageRating: Number(averageRating.toFixed(2)),
         },
       },
-    });
+    }, 200);
   } catch (error) {
     console.error("獲取商家評分時發生錯誤:", error);
-    return response.status(500).send({
+    return c.json({
       message: "獲取評分失敗，請稍後再試",
-    });
+    }, 500);
   }
 });
 
@@ -320,9 +325,11 @@ router.get("/employer/:employerId", authenticated, requireWorker, async ({ param
  * 商家獲取自己給出的所有評分
  * GET /rating/my-ratings/employer
  */
-router.get("/my-ratings/employer", authenticated, requireEmployer, requireApprovedEmployer, async ({ user, response, query }) => {
+router.get("/my-ratings/employer", authenticated, requireEmployer, requireApprovedEmployer, async (c) => {
   try {
-    const { limit = 10, offset = 0 } = query;
+    const user = c.get("user");
+    const limit = c.req.query("limit") || "10";
+    const offset = c.req.query("offset") || "0";
     const requestLimit = Number.parseInt(limit);
     const requestOffset = Number.parseInt(offset);
     const employerId = user.employerId;
@@ -360,7 +367,7 @@ router.get("/my-ratings/employer", authenticated, requireEmployer, requireApprov
     const hasMore = myRatings.length > requestLimit;
     const returnRatings = hasMore ? myRatings.slice(0, requestLimit) : myRatings;
 
-    return response.send({
+    return c.json({
       data: {
         myRatings: returnRatings.map((rating) => ({
           ratingId: rating.ratingId,
@@ -384,12 +391,12 @@ router.get("/my-ratings/employer", authenticated, requireEmployer, requireApprov
           returned: returnRatings.length,
         },
       },
-    });
+    }, 200);
   } catch (error) {
     console.error("獲取商家評分記錄時發生錯誤:", error);
-    return response.status(500).send({
+    return c.json({
       message: "獲取評分記錄失敗，請稍後再試",
-    });
+    }, 500);
   }
 });
 
@@ -397,9 +404,11 @@ router.get("/my-ratings/employer", authenticated, requireEmployer, requireApprov
  * 打工者獲取自己給出的所有評分
  * GET /rating/my-ratings/worker
  */
-router.get("/my-ratings/worker", authenticated, requireWorker, async ({ user, response, query }) => {
+router.get("/my-ratings/worker", authenticated, requireWorker, async (c) => {
   try {
-    const { limit = 10, offset = 0 } = query;
+    const user = c.get("user");
+    const limit = c.req.query("limit") || "10";
+    const offset = c.req.query("offset") || "0";
     const requestLimit = Number.parseInt(limit);
     const requestOffset = Number.parseInt(offset);
     const workerId = user.workerId;
@@ -437,7 +446,7 @@ router.get("/my-ratings/worker", authenticated, requireWorker, async ({ user, re
     const hasMore = myRatings.length > requestLimit;
     const returnRatings = hasMore ? myRatings.slice(0, requestLimit) : myRatings;
 
-    return response.send({
+    return c.json({
       data: {
         myRatings: returnRatings.map((rating) => ({
           ratingId: rating.ratingId,
@@ -461,12 +470,12 @@ router.get("/my-ratings/worker", authenticated, requireWorker, async ({ user, re
           returned: returnRatings.length,
         },
       },
-    });
+    }, 200);
   } catch (error) {
     console.error("獲取打工者評分記錄時發生錯誤:", error);
-    return response.status(500).send({
+    return c.json({
       message: "獲取評分記錄失敗，請稍後再試",
-    });
+    }, 500);
   }
 });
 
@@ -474,11 +483,13 @@ router.get("/my-ratings/worker", authenticated, requireWorker, async ({ user, re
 
 /**
  * 商家獲取別人給自己的所有評分
- * GET /rating/received-ratings/employer
+ * GET /rating/received-ratings/employer/
  */
-router.get("/received-ratings/employer", authenticated, requireEmployer, async ({ user, response, query }) => {
+router.get("/received-ratings/employer/", authenticated, requireEmployer, async (c) => {
   try {
-    const { limit = 10, offset = 0 } = query;
+    const user = c.get("user");
+    const limit = c.req.query("limit") || "10";
+    const offset = c.req.query("offset") || "0";
     const requestLimit = Number.parseInt(limit);
     const requestOffset = Number.parseInt(offset);
     const employerId = user.employerId;
@@ -516,7 +527,7 @@ router.get("/received-ratings/employer", authenticated, requireEmployer, async (
     const hasMore = receivedRatings.length > requestLimit;
     const returnRatings = hasMore ? receivedRatings.slice(0, requestLimit) : receivedRatings;
 
-    return response.send({
+    return c.json({
       data: {
         receivedRatings: returnRatings.map((rating) => ({
           ratingId: rating.ratingId,
@@ -540,12 +551,12 @@ router.get("/received-ratings/employer", authenticated, requireEmployer, async (
           returned: returnRatings.length,
         },
       },
-    });
+    }, 200);
   } catch (error) {
     console.error("獲取商家收到的評分記錄時發生錯誤:", error);
-    return response.status(500).send({
+    return c.json({
       message: "獲取收到的評分記錄失敗，請稍後再試",
-    });
+    }, 500);
   }
 });
 
@@ -553,9 +564,11 @@ router.get("/received-ratings/employer", authenticated, requireEmployer, async (
  * 打工者獲取別人給自己的所有評分
  * GET /rating/received-ratings/worker
  */
-router.get("/received-ratings/worker", authenticated, requireWorker, async ({ user, response, query }) => {
+router.get("/received-ratings/worker", authenticated, requireWorker, async (c) => {
   try {
-    const { limit = 10, offset = 0 } = query;
+    const user = c.get("user");
+    const limit = c.req.query("limit") || "10";
+    const offset = c.req.query("offset") || "0";
     const requestLimit = Number.parseInt(limit);
     const requestOffset = Number.parseInt(offset);
     const workerId = user.workerId;
@@ -593,7 +606,7 @@ router.get("/received-ratings/worker", authenticated, requireWorker, async ({ us
     const hasMore = receivedRatings.length > requestLimit;
     const returnRatings = hasMore ? receivedRatings.slice(0, requestLimit) : receivedRatings;
 
-    return response.send({
+    return c.json({
       data: {
         receivedRatings: returnRatings.map((rating) => ({
           ratingId: rating.ratingId,
@@ -617,12 +630,12 @@ router.get("/received-ratings/worker", authenticated, requireWorker, async ({ us
           returned: returnRatings.length,
         },
       },
-    });
+    }, 200);
   } catch (error) {
     console.error("獲取打工者收到的評分記錄時發生錯誤:", error);
-    return response.status(500).send({
+    return c.json({
       message: "獲取收到的評分記錄失敗，請稍後再試",
-    });
+    }, 500);
   }
 });
 
@@ -632,9 +645,11 @@ router.get("/received-ratings/worker", authenticated, requireWorker, async ({ us
  * 商家獲取可以評分的工作列表
  * GET /rating/list/employer
  */
-router.get("/list/employer", authenticated, requireEmployer, requireApprovedEmployer, async ({ user, response, query }) => {
+router.get("/list/employer", authenticated, requireEmployer, requireApprovedEmployer, async (c) => {
   try {
-    const { limit = 10, offset = 0 } = query;
+    const user = c.get("user");
+    const limit = c.req.query("limit") || "10";
+    const offset = c.req.query("offset") || "0";
     const requestLimit = Number.parseInt(limit);
     const requestOffset = Number.parseInt(offset);
     const employerId = user.employerId;
@@ -673,7 +688,7 @@ router.get("/list/employer", authenticated, requireEmployer, requireApprovedEmpl
     const hasMore = ratableGigs.length > requestLimit;
     const returnGigs = hasMore ? ratableGigs.slice(0, requestLimit) : ratableGigs;
 
-    return response.send({
+    return c.json({
       data: {
         ratableGigs: returnGigs.map((gig) => ({
           gigId: gig.gigId,
@@ -691,12 +706,12 @@ router.get("/list/employer", authenticated, requireEmployer, requireApprovedEmpl
           returned: returnGigs.length,
         },
       },
-    });
+    }, 200);
   } catch (error) {
     console.error("獲取可評分工作時發生錯誤:", error);
-    return response.status(500).send({
+    return c.json({
       message: "獲取可評分工作失敗，請稍後再試",
-    });
+    }, 500);
   }
 });
 
@@ -704,9 +719,11 @@ router.get("/list/employer", authenticated, requireEmployer, requireApprovedEmpl
  * 打工者獲取可以評分的工作列表
  * GET /rating/list/worker
  */
-router.get("/list/worker", authenticated, requireWorker, async ({ user, response, query }) => {
+router.get("/list/worker", authenticated, requireWorker, async (c) => {
   try {
-    const { limit = 10, offset = 0 } = query;
+    const user = c.get("user");
+    const limit = c.req.query("limit") || "10";
+    const offset = c.req.query("offset") || "0";
     const requestLimit = Number.parseInt(limit);
     const requestOffset = Number.parseInt(offset);
     const workerId = user.workerId;
@@ -743,7 +760,7 @@ router.get("/list/worker", authenticated, requireWorker, async ({ user, response
     const hasMore = ratableGigs.length > requestLimit;
     const returnGigs = hasMore ? ratableGigs.slice(0, requestLimit) : ratableGigs;
 
-    return response.send({
+    return c.json({
       data: {
         ratableGigs: returnGigs.map((gig) => ({
           gigId: gig.gigId,
@@ -761,12 +778,12 @@ router.get("/list/worker", authenticated, requireWorker, async ({ user, response
           returned: returnGigs.length,
         },
       },
-    });
+    }, 200);
   } catch (error) {
     console.error("獲取可評分工作時發生錯誤:", error);
-    return response.status(500).send({
+    return c.json({
       message: "獲取可評分工作失敗，請稍後再試",
-    });
+    }, 500);
   }
 });
 

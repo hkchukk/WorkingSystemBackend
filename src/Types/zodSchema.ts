@@ -1,8 +1,13 @@
-import { z } from "@nhttp/zod";
+import * as z from "zod";
 import { isValidCity, isValidDistrict } from "../Utils/AreaData";
 import moment from "moment";
 
-/* user route */
+export const loginSchema = z.object({
+  email: z.email("Invalid email format"),
+  password: z.string(),
+});
+
+/* user route schemas */
 export const workerSignupSchema = z.object({
   email: z.email("Invalid email format"),
   password: z
@@ -83,9 +88,7 @@ export const updatePasswordSchema = z.object({
     .regex(/[0-9]/, "Must contain at least one number"),
 });
 
-/* end user route */
-
-// 工作發佈的驗證 Schema
+/* gig route schemas */
 export const createGigSchema = z.object({
   title: z.string().min(1, "工作標題不能為空").max(256, "工作標題過長"),
   description: z.any().optional(),
@@ -143,7 +146,7 @@ export const createGigSchema = z.object({
     message: "刊登日期不能是過去的日期"
   }),
   unlistedAt: z.coerce.date().optional().refine((date) => {
-    if (!date) return true; // 可選字段，沒值就通過
+    if (!date) return true;
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     return date >= today;
@@ -340,20 +343,29 @@ export const updateGigSchema = z.object({
     path: ["unlistedAt"]
   });
 
-// 申請審核驗證 Schema
+/* application route schemas */
 export const reviewApplicationSchema = z.object({
   status: z.enum(["approved", "rejected"], {
     message: "必須選擇核准或拒絕",
   }),
 });
 
-// 評分相關 Schema
+/* rating route schemas */
 export const createRatingSchema = z.object({
   ratingValue: z.number().int().min(1).max(5, "評分必須在1到5之間"),
   comment: z.string().max(1000, "評論不能超過1000字").optional(),
 });
 
-// 通知相關 Schema
+/* admin route schemas */
+export const adminRegisterSchema = z.object({
+  email: z.email("Invalid email format"),
+  password: z.string().min(8, "Password must be at least 8 characters")
+    .regex(/[A-Z]/, "Must contain at least one uppercase letter")
+    .regex(/[a-z]/, "Must contain at least one lowercase letter")
+    .regex(/[0-9]/, "Must contain at least one number")
+});
+
+/* notification route schemas */
 export const createNotificationSchema = z.object({
   receiverId: z.string().min(1, "接收者ID不能為空"),
   title: z.string().min(1, "標題不能為空").max(256, "標題過長"),
@@ -378,17 +390,9 @@ export const createGroupNotificationSchema = z.object({
     employers: z.boolean().optional(),
     admins: z.boolean().optional(),
   }).refine(data => Object.values(data).some(Boolean), {
-    message: "至少需要選擇一個用戶群組"
+    message: "至少需要選擇一個群組",
   }),
   title: z.string().min(1, "標題不能為空").max(256, "標題過長"),
   message: z.string().min(1, "訊息不能為空"),
   type: z.string().min(1, "通知類型不能為空"),
 });
-
-export const adminRegister = z.object({
-  email: z.email("Invalid email format"),
-  password: z.string().min(8, "Password must be at least 8 characters")
-    .regex(/[A-Z]/, "Must contain at least one uppercase letter")
-    .regex(/[a-z]/, "Must contain at least one lowercase letter")
-    .regex(/[0-9]/, "Must contain at least one number")
-})

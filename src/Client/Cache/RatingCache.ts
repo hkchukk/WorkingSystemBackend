@@ -1,5 +1,5 @@
-import { CacheManager } from "./CacheManager.ts";
-import { CACHE_PREFIXES, CACHE_TTL } from "./CacheConfig.ts";
+import { CacheManager } from "./CacheManager";
+import { CACHE_PREFIXES, CACHE_TTL } from "./CacheConfig";
 
 export interface RatingStats {
   totalRatings: number;

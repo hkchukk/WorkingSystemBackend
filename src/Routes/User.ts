@@ -1,85 +1,83 @@
-import { Router } from "@nhttp/nhttp";
-import passport from "passport";
-import { authenticated } from "../Middleware/middleware.ts";
-import signature from "cookie-signature";
-import type IRouter from "../Interfaces/IRouter.ts";
-import dbClient from "../Client/DrizzleClient.ts";
-import { eq, avg, count } from "drizzle-orm";
-import { employers, workers, workerRatings, employerRatings } from "../Schema/DatabaseSchema.ts";
-import { argon2Config } from "../config.ts";
-import { hash as argon2hash, verify } from "@node-rs/argon2";
-import validate from "@nhttp/zod";
-import NotificationHelper from "../Utils/NotificationHelper.ts";
+import { Hono } from "hono";
+import type { HonoGenericContext } from "../Types/types";
+import { zValidator } from "@hono/zod-validator";
 import {
-  employerSignupSchema,
+  loginSchema,
   workerSignupSchema,
+  employerSignupSchema,
   updateWorkerProfileSchema,
   updateEmployerProfileSchema,
   updatePasswordSchema,
-} from "../Middleware/validator.ts";
-import { uploadDocument, uploadProfilePhoto } from "../Middleware/uploadFile.ts";
-import { Role } from "../Types/types.ts";
-import { s3Client, FileManager, RatingCache, UserCache } from "../Client/Cache/index.ts";
+} from "../Types/zodSchema";
+import { authenticate, authenticated } from "../Middleware/authentication";
+import { uploadDocument, uploadProfilePhoto } from "../Middleware/fileUpload";
+import type IRouter from "../Interfaces/IRouter";
+import dbClient from "../Client/DrizzleClient";
+import { eq, avg, count } from "drizzle-orm";
+import { employers, workers, workerRatings, employerRatings } from "../Schema/DatabaseSchema";
+import { argon2Config } from "../config";
+import { hash as argon2hash, verify } from "@node-rs/argon2";
+import { Role } from "../Types/types";
+import { UserCache, FileManager, RatingCache, s3Client } from "../Client/Cache/Index";
+import NotificationHelper from "../Utils/NotificationHelper";
+import { requireEmployer } from "../Middleware/guards";
 
-const router = new Router();
+const router = new Hono<HonoGenericContext>();
 
-router.post(
-  "/register/worker",
-  validate(workerSignupSchema),
-  async ({ headers, response, body }) => {
-    const platform = headers.get("platform");
-    if (!platform?.length) {
-      return response.status(400).send("Platform is required");
-    }
-    const {
+// Worker Registration
+router.post("/register/worker", zValidator("json", workerSignupSchema), async (c) => {
+  const platform = c.req.header("platform");
+  if (!platform?.length) {
+    return c.text("Platform is required", 400);
+  }
+
+  const body = c.req.valid("json");
+  const {
+    email,
+    password,
+    firstName,
+    lastName,
+    phoneNumber,
+    highestEducation = "大學",
+    schoolName,
+    major,
+    studyStatus = "就讀中",
+    certificates = [],
+  } = body;
+
+  const existingUser = await dbClient.query.workers.findFirst({
+    where: eq(workers.email, email),
+  });
+
+  if (existingUser) {
+    return c.text("User with this email already exists", 409);
+  }
+
+  const hashedPassword = await argon2hash(password, argon2Config);
+
+  const insertedUsers = await dbClient
+    .insert(workers)
+    .values({
       email,
-      password,
+      password: hashedPassword,
       firstName,
       lastName,
       phoneNumber,
-      highestEducation = "大學",
+      highestEducation,
       schoolName,
       major,
-      studyStatus = "就讀中",
-      certificates = [],
-    } = body;
+      studyStatus,
+      certificates,
+    })
+    .returning();
 
-    const existingUser = await dbClient.query.workers.findFirst({
-      where: eq(workers.email, email),
-    });
+  const newUser = insertedUsers[0];
 
-    if (existingUser) {
-      return response.status(409).send("User with this email already exists");
-    }
+  // 發送歡迎通知給新註冊的打工者
+  await NotificationHelper.notifyUserWelcome(newUser.workerId, newUser.firstName, "worker");
 
-    const hashedPassword = await argon2hash(password, argon2Config);
-
-    const insertedUsers = await dbClient
-      .insert(workers)
-      .values({
-        email,
-        password: hashedPassword,
-        firstName,
-        lastName,
-        phoneNumber,
-        highestEducation,
-        schoolName,
-        major,
-        studyStatus,
-        certificates,
-      })
-      .returning();
-
-    const newUser = insertedUsers[0];
-
-    // 發送歡迎通知給新註冊的打工者
-    await NotificationHelper.notifyUserWelcome(
-      newUser.workerId,
-      newUser.firstName,
-      "worker"
-    );
-
-    return response.status(201).send({
+  return c.json(
+    {
       message: "User registered successfully:",
       user: {
         workerId: newUser.workerId,
@@ -87,177 +85,163 @@ router.post(
         firstName: newUser.firstName,
         lastName: newUser.lastName,
       },
-    });
-  },
-);
+    },
+    201
+  );
+});
 
-router.post(
-  "/register/employer",
-  uploadDocument,
-  validate(employerSignupSchema),
-  async ({ headers, body, file: reqFile, response }) => {
+// Employer Registration
+router.post("/register/employer", uploadDocument, zValidator("json", employerSignupSchema), async (c) => {
+  const uploadedFiles = c.get("uploadedFiles") as any[];
+  const body = c.req.valid("json");
 
-    let files = null;
-    if (body.identificationType === "businessNo" && reqFile.verficationDocument) {
-      files = reqFile.verficationDocument.length === undefined ? [reqFile.verficationDocument] : reqFile.verficationDocument;
-    } else if (body.identificationType === "personalId" && reqFile.identificationDocument) {
-      files = reqFile.identificationDocument.length === undefined ? [reqFile.identificationDocument] : reqFile.identificationDocument;
-    } else {
-      return response.status(400).send("Invalid identification document");
-    }
+  let files = null;
+  if (body.identificationType === "businessNo" && uploadedFiles?.find((f) => f.fieldName === "verficationDocument")) {
+    const verficationFiles = uploadedFiles.filter((f) => f.fieldName === "verficationDocument");
+    files = verficationFiles.length === 1 ? [verficationFiles[0]] : verficationFiles;
+  } else if (body.identificationType === "personalId" && uploadedFiles?.find((f) => f.fieldName === "identificationDocument")) {
+    const identificationFiles = uploadedFiles.filter((f) => f.fieldName === "identificationDocument");
+    files = identificationFiles.length === 1 ? [identificationFiles[0]] : identificationFiles;
+  } else {
+    return c.text("Invalid identification document", 400);
+  }
 
-    try {
-      const platform: string = headers.get("platform");
-      if (platform === "web-employer") {
-        const {
+  try {
+    const platform = c.req.header("platform");
+    if (platform === "web-employer") {
+      const { email, password, employerName, branchName, industryType, address, phoneNumber, identificationType, identificationNumber } = body;
+
+      const existing = await dbClient.query.employers.findFirst({
+        where: eq(employers.email, email),
+      });
+
+      if (existing) {
+        return c.text("employer with this email already exists", 409);
+      }
+
+      const filesInfo: {
+        originalName: string;
+        type: string;
+        r2Name: string;
+      }[] = files.map((file: { name: string; type: string; filename: string }) => ({
+        originalName: file.name as string,
+        type: file.type as string,
+        r2Name: file.filename as string,
+      }));
+
+      const hashedPassword = await argon2hash(password, argon2Config);
+
+      // 上傳身份證明文件到 S3
+      await Promise.all(
+        files.map(async (file: { path: string; filename: string; name: string }) => {
+          const currentFile = Bun.file(file.path);
+          if (!(await currentFile.exists())) {
+            throw new Error(`Verification document file not found: ${file.name}`);
+          }
+          await s3Client.write(
+            `documents/${identificationType}/${file.filename}`,
+            currentFile,
+          );
+          console.log(`File ${file.name} uploaded successfully`);
+        })
+      );
+
+      const insertedUsers = await dbClient
+        .insert(employers)
+        .values({
           email,
-          password,
+          password: hashedPassword,
           employerName,
           branchName,
-          industryType,
+          industryType: industryType as any, // Type assertion for enum
           address,
           phoneNumber,
           identificationType,
           identificationNumber,
-          employerPhoto,
-        } = body;
+          verificationDocuments: JSON.stringify(filesInfo),
+          employerPhoto: null,
+        })
+        .returning();
 
-        const existing = await dbClient.query.employers.findFirst({
-          where: eq(employers.email, email),
-        });
+      const newUser = insertedUsers[0];
 
-        if (existing) {
-          return response
-            .status(409)
-            .send("employer with this email already exists");
-        }
+      // 發送歡迎通知給新註冊的商家
+      await NotificationHelper.notifyUserWelcome(newUser.employerId, newUser.employerName, "employer");
 
-        const filesInfo: {
-          originalName: string;
-          type: string;
-          r2Name: string;
-        }[] = files.map((
-          file: { name: string; type: string; filename: string },
-        ) => ({
-          originalName: file.name as string,
-          type: file.type as string,
-          r2Name: file.filename as string,
-        }));
-
-        const hashedPassword = await argon2hash(password, argon2Config);
-
-        await Promise.all(
-          files.map(
-            async (file: { path: string; filename: string; name: string }) => {
-              const currentFile = Bun.file(file.path);
-              if (!currentFile.exists()) {
-                throw new Error(
-                  `Verification document file not found: ${file.name}`,
-                );
-              }
-              await s3Client.write(
-                `documents/${identificationType}/${file.filename}`,
-                currentFile,
-              );
-              console.log(`File ${file.name} uploaded successfully`);
-            },
-          ),
-        );
-
-        const insertedUsers = await dbClient
-          .insert(employers)
-          .values({
-            email,
-            password: hashedPassword,
-            employerName,
-            branchName,
-            industryType,
-            address,
-            phoneNumber,
-            identificationType,
-            identificationNumber,
-            verificationDocuments: JSON.stringify(filesInfo),
-            employerPhoto,
-          })
-          .returning();
-
-        const newUser = insertedUsers[0];
-
-        // 發送歡迎通知給新註冊的商家
-        await NotificationHelper.notifyUserWelcome(
-          newUser.employerId,
-          newUser.employerName,
-          "employer"
-        );
-
-        return response.status(201).send({
+      return c.json(
+        {
           message: "User registered successfully:",
           user: {
             employerId: newUser.employerId,
             email: newUser.email,
             employerName: newUser.employerName,
           },
-        });
-      }
-      return response.status(400).send("Invalid platform");
-    } catch (error) {
-      console.error("Error in register/employee:", error);
-      return response.status(500).send("Internal server error");
-    } finally {
-      FileManager.cleanupTempFiles(files);
-    }
-  },
-);
-
-router.post("/login", (rev, next) => {
-  passport.authenticate("local", (error: any, user: any, info: any) => {
-    if (error) return next(error);
-    if (!user) {
-      console.error("Authentication failed:", info);
-      return rev.response.status(401).send(info?.message || "Authentication failed");
-    }
-
-    rev.logIn(user, (err: any) => {
-      if (err) return next(err);
-
-      rev.response.cookie(
-        "connect.sid",
-        `s:${signature.sign(rev.sessionID, process.env.SESSIONSECRET)}`
+        },
+        201
       );
-
-      return rev.response.status(200).send({user});
-    });
-  })(rev, next);
+    }
+    return c.text("Invalid platform", 400);
+  } catch (error) {
+    console.error("Error in register/employee:", error);
+    return c.text("Internal server error", 500);
+  } finally {
+    // 清理臨時文件
+    FileManager.cleanupTempFiles(files);
+  }
 });
 
-router.get("/logout", (rev) => {
-  rev.logout((err: any) => {
-    if (err) {
-      return rev.response.status(200).send("Logout error" + err);
-    }
+router.post("/login", zValidator("json", loginSchema), async (c) => {
+  // 檢查是否已經登入
+  const session = c.get("session");
+  if (session && session.get("id")) {
+    return c.text("已經登入，請先登出", 400);
+  }
 
-    if (rev.user) {
-      if (rev.user.role === Role.WORKER) UserCache.clearUserProfile(rev.user.workerId, Role.WORKER);
-      if (rev.user.role === Role.EMPLOYER) UserCache.clearUserProfile(rev.user.employerId, Role.EMPLOYER);
-      if (rev.user.role === Role.ADMIN) UserCache.clearUserProfile(rev.user.adminId, Role.ADMIN);
-    }
-
-    rev.session.destroy();
-    rev.response.cookie("connect.sid", "", {
-      expires: new Date(0),
-      maxAge: 0,
-    });
-
-    return rev.response.status(200).send("Logged out successfully");
+  // 執行認證
+  await authenticate(c, async () => {
+    // 認證成功後的處理在 authenticate 中間件中完成
   });
+
+  const userSession = c.get("session");
+  return c.json({ user: userSession });
 });
 
-router.get("/profile", authenticated, async ({ user, response }) => {
+router.get("/logout", async (c) => {
+  const session = c.get("session");
+
+  // 檢查是否已經登出
+  if (!session || !session.get("id")) {
+    return c.text("已經登出或沒有活動會話", 400);
+  }
+
+  // 獲取用戶信息用於清除快取
+  const userId = session.get("id");
+  const role = session.get("role");
+
+  // 清除用戶快取
+  if (userId && role) {
+    await UserCache.clearUserProfile(userId, role);
+  }
+
+  // 刪除會話
+  session.deleteSession();
+
+  // 清除 cookie
+  c.header("Set-Cookie", "connect.sid=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT; HttpOnly; SameSite=Lax");
+
+  return c.text("Logged out successfully");
+});
+
+// Get User Profile
+router.get("/profile", authenticated, async (c) => {
+  const user = c.get("user");
+
   if (user.role === Role.WORKER) {
     const { password, profilePhoto, ...workerData } = user;
     let photoUrlData = null;
 
-    if (profilePhoto?.r2Name) {
+    // 檢查 profilePhoto 是否存在且有 r2Name
+    if (profilePhoto && typeof profilePhoto === 'object' && profilePhoto.r2Name) {
       const url = await FileManager.getPresignedUrl(`profile-photos/workers/${profilePhoto.r2Name}`);
       if (url) {
         photoUrlData = {
@@ -266,12 +250,16 @@ router.get("/profile", authenticated, async ({ user, response }) => {
           type: profilePhoto.type,
         };
       } else {
-        // Keep photoUrlData as null if URL generation fails
-        console.warn(`Failed to generate presigned URL for worker ${user.workerId} photo ${profilePhoto.r2Name}`);
+        console.warn(`❌ Worker ${user.workerId} 照片 URL 生成失敗: ${profilePhoto.r2Name}`);
+        photoUrlData = {
+          url: null,
+          error: "照片 URL 生成失敗",
+          originalName: profilePhoto.originalName,
+          type: profilePhoto.type,
+        };
       }
     }
-    
-    // 使用快取獲取評價統計
+
     let ratingStats = await RatingCache.getRatingStats(user.workerId, Role.WORKER);
 
     if (!ratingStats) {
@@ -283,7 +271,7 @@ router.get("/profile", authenticated, async ({ user, response }) => {
         .from(workerRatings)
         .where(eq(workerRatings.workerId, user.workerId));
 
-      ratingStats = {
+      const ratingStats = {
         totalRatings: dbRatingStats[0]?.totalRatings || 0,
         averageRating: dbRatingStats[0]?.averageRating ? Number(dbRatingStats[0].averageRating) : 0,
       };
@@ -291,18 +279,19 @@ router.get("/profile", authenticated, async ({ user, response }) => {
       await RatingCache.setRatingStats(user.workerId, Role.WORKER, ratingStats);
     }
 
-    return { 
-      ...workerData, 
+    return c.json({
+      ...workerData,
       profilePhoto: photoUrlData,
-      ratingStats
-    };
+      ratingStats,
+    });
   }
 
   if (user.role === Role.EMPLOYER) {
-    const { password, employerPhoto, verificationDocuments, ...employerData } = user; // Exclude verificationDocuments for now
+    const { password, employerPhoto, verificationDocuments, ...employerData } = user;
     let photoUrlData = null;
 
-    if (employerPhoto?.r2Name) {
+    // 檢查 employerPhoto 是否存在且有 r2Name
+    if (employerPhoto && typeof employerPhoto === 'object' && employerPhoto.r2Name) {
       const url = await FileManager.getPresignedUrl(`profile-photos/employers/${employerPhoto.r2Name}`);
       if (url) {
         photoUrlData = {
@@ -311,12 +300,16 @@ router.get("/profile", authenticated, async ({ user, response }) => {
           type: employerPhoto.type,
         };
       } else {
-        // Keep photoUrlData as null if URL generation fails
-        console.warn(`Failed to generate presigned URL for employer ${user.employerId} photo ${employerPhoto.r2Name}`);
+        console.warn(`❌ Employer ${user.employerId} 照片 URL 生成失敗: ${employerPhoto.r2Name}`);
+        photoUrlData = {
+          url: null,
+          error: "照片 URL 生成失敗",
+          originalName: employerPhoto.originalName,
+          type: employerPhoto.type,
+        };
       }
     }
 
-    // 使用快取獲取評價統計
     let ratingStats = await RatingCache.getRatingStats(user.employerId, Role.EMPLOYER);
 
     if (!ratingStats) {
@@ -328,7 +321,7 @@ router.get("/profile", authenticated, async ({ user, response }) => {
         .from(employerRatings)
         .where(eq(employerRatings.employerId, user.employerId));
 
-      ratingStats = {
+      const ratingStats = {
         totalRatings: dbRatingStats[0]?.totalRatings || 0,
         averageRating: dbRatingStats[0]?.averageRating ? Number(dbRatingStats[0].averageRating) : 0,
       };
@@ -336,30 +329,34 @@ router.get("/profile", authenticated, async ({ user, response }) => {
       await RatingCache.setRatingStats(user.employerId, Role.EMPLOYER, ratingStats);
     }
 
-    // Return verificationDocuments as is from the DB for this route; it's handled by another endpoint.
-    return { 
-      ...employerData, 
-      employerPhoto: photoUrlData, 
+    return c.json({
+      ...employerData,
+      employerPhoto: photoUrlData,
       verificationDocuments,
-      ratingStats
-    };
+      ratingStats,
+    });
   }
 
-  return response.status(400).send("Invalid role");
+  return c.text("Invalid role", 400);
 });
 
-router.put("/update/profile", authenticated, async ({ body, response, request, user }) => {
+// Update Profile
+router.put("/update/profile", authenticated, async (c) => {
   try {
+    const user = c.get("user");
+    const body = await c.req.json();
+
     if (user.role === Role.WORKER) {
       const validationResult = updateWorkerProfileSchema.safeParse(body);
 
       if (!validationResult.success) {
-        return response
-          .status(400)
-          .json({
+        return c.json(
+          {
             message: "Validation failed",
-            errors: validationResult.error.flatten(),
-          });
+            errors: validationResult.error.issues,
+          },
+          400
+        );
       }
 
       const validatedData = validationResult.data;
@@ -372,23 +369,26 @@ router.put("/update/profile", authenticated, async ({ body, response, request, u
 
       const { password, ...workerData } = updatedWorker[0];
       await UserCache.clearUserProfile(user.workerId, Role.WORKER);
-      return response.status(200).json(workerData);
-
+      return c.json(workerData);
     }
+
     if (user.role === Role.EMPLOYER) {
       const validationResult = updateEmployerProfileSchema.safeParse(body);
 
       if (!validationResult.success) {
-        return response.status(400).json({
-          message: "Validation failed",
-          errors: validationResult.error.flatten(),
-        });
+        return c.json(
+          {
+            message: "Validation failed",
+            errors: validationResult.error.issues,
+          },
+          400
+        );
       }
 
       const validatedData = validationResult.data;
 
-      if(Object.keys(validatedData).length === 0) {
-        return response.status(400).send("No valid data provided for update");
+      if (Object.keys(validatedData).length === 0) {
+        return c.text("No valid data provided for update", 400);
       }
 
       const updatedEmployer = await dbClient
@@ -398,342 +398,357 @@ router.put("/update/profile", authenticated, async ({ body, response, request, u
         .returning();
 
       if (updatedEmployer.length === 0) {
-        return response.status(404).send("Employer not found");
+        return c.text("Employer not found", 404);
       }
 
       const { password: empPassword, ...employerData } = updatedEmployer[0];
       await UserCache.clearUserProfile(user.employerId, Role.EMPLOYER);
-      return response.status(200).json(employerData);
-
+      return c.json(employerData);
     }
-    return response.status(400).send("Invalid user role for profile update");
+
+    return c.text("Invalid user role for profile update", 400);
   } catch (error) {
     console.error("Error updating profile:", error);
-    return response.status(500).send("Internal server error");
+    return c.text("Internal server error", 500);
   }
 });
 
-//update password
-router.put(
-  "/update/password",
-  authenticated,
-  async ({ body, user, response }) => {
-    try {
-      const { currentPassword, newPassword } = body;
-
-      if (!currentPassword || !newPassword) {
-        return response.status(400).send("Current and new passwords are required");
-      }
-
-      if (currentPassword === newPassword) {
-        return response.status(400).send("New password cannot be the same as current password");
-      }
-
-      if (!updatePasswordSchema.safeParse(body).success) {
-        return response.status(400).json({
-          message: "Validation failed",
-          errors: updatePasswordSchema.safeParse(body).error.flatten(),
-        });
-      }
-
-      if (user.role === Role.WORKER) {
-        const worker = await dbClient.query.workers.findFirst({
-          where: eq(workers.workerId, user.workerId),
-        });
-
-        if (!worker) {
-          return response.status(404).send("Worker not found");
-        }
-
-        const passwordCorrect = await verify(worker.password, currentPassword, argon2Config);
-        if (!passwordCorrect) {
-          return response.status(401).send("Current password is incorrect");
-        }
-
-        const hashedNewPassword = await argon2hash(newPassword, argon2Config);
-
-        await dbClient
-          .update(workers)
-          .set({ password: hashedNewPassword, updatedAt: new Date() })
-          .where(eq(workers.workerId, user.workerId));
-
-        return response.status(200).send("Password updated successfully");
-
-      } else if (user.role === Role.EMPLOYER) {
-        const employer = await dbClient.query.employers.findFirst({
-          where: eq(employers.employerId, user.employerId),
-        });
-
-        if (!employer) {
-          return response.status(404).send("Employer not found");
-        }
-
-        const passwordCorrect = await verify(employer.password, currentPassword, argon2Config);
-        if (!passwordCorrect) {
-          return response.status(401).send("Current password is incorrect");
-        }
-
-        const hashedNewPassword = await argon2hash(newPassword, argon2Config);
-
-        await dbClient
-          .update(employers)
-          .set({ password: hashedNewPassword, updatedAt: new Date() })
-          .where(eq(employers.employerId, user.employerId));
-
-        return response.status(200).send("Password updated successfully");
-
-      } else {
-        return response.status(400).send("Invalid user role for password update");
-      }
-    } catch (error) {
-      console.error("Error updating password:", error);
-      return response.status(500).send("Internal server error");
-    }
-  }
-)
-
-router.put(
-  "/update/identification",
-  authenticated,
-  uploadDocument,
-  async ({ headers, body, file: reqFile, response, user }) => {
-    let files = null;
-    try {
-      if (reqFile.length === 0) {
-        return response.status(400).send("No file uploaded");
-      }
-
-      if (body.identificationType === "businessNo" && reqFile.verficationDocument) {
-        files = reqFile.verficationDocument.length === undefined ? [reqFile.verficationDocument] : reqFile.verficationDocument;
-      } else if (body.identificationType === "personalId" && reqFile.identificationDocument) {
-        files = reqFile.identificationDocument.length === undefined ? [reqFile.identificationDocument] : reqFile.identificationDocument;
-      } else {
-        return response.status(400).send("Invalid identification document");
-      }
-
-      if (user.role === Role.EMPLOYER && headers.get("platform") === "web-employer") {
-        const filesInfo: {
-          originalName: string;
-          type: string;
-          r2Name: string;
-        }[] = files.map((file: { name: string; type: string; filename: string }) => ({
-          originalName: file.name as string,
-          type: file.type as string,
-          r2Name: file.filename as string,
-        }));
-
-        const deleteFiles = JSON.parse(user.verificationDocuments).map(
-          (file: { r2Name: string }) =>
-            s3Client.delete(`documents/${body.identificationType}/${file.r2Name}`)
-        );
-
-        await Promise.all(deleteFiles);
-
-        await Promise.all(
-          files.map(async (file: { path: string; filename: string; name: string }) => {
-            const currentFile = Bun.file(file.path);
-            if (!currentFile.exists()) {
-              throw new Error(`Verification document file not found: ${file.name}`);
-            }
-            await s3Client.write(
-              `documents/${body.identificationType}/${file.filename}`,
-              currentFile,
-            );
-            console.log(`File ${file.name} uploaded successfully`);
-          }),
-        );
-
-        await dbClient
-          .update(employers)
-          .set({
-            identificationType: body.identificationType,
-            identificationNumber: body.identificationNumber,
-            verificationDocuments: JSON.stringify(filesInfo),
-            updatedAt: new Date(),
-          })
-          .where(eq(employers.employerId, user.employerId));
-
-        await UserCache.clearUserProfile(user.employerId, Role.EMPLOYER);
-        return response.status(200).send("Identification updated successfully");
-      }
-      return response.status(400).send("Invalid user role for identification update");
-    }
-    catch (error) {
-      console.error("Error updating identification:", error);
-      return response.status(500).send("Internal server error");
-    }
-    finally {
-      FileManager.cleanupTempFiles(files);
-    }
-  }
-);
-
-router.put(
-  "/update/profilePhoto",
-  authenticated,
-  uploadProfilePhoto,
-  async ({ headers, file: reqFile, user, response , body}) => {
-    try {
-     
-      if (reqFile.profilePhoto === null || body.deleteProfilePhoto === "true") {
-        if(user.employerPhoto == null)return response.status(200).send("No profile photo to delete");
-        await s3Client.delete(`profile-photos/employers/${user.employerPhoto.r2Name}`);
-        await dbClient
-          .update(employers)
-          .set({
-            employerPhoto: null,
-            updatedAt: new Date(),
-          })
-          .where(eq(employers.employerId, user.employerId));
-        return response.status(200).send("Profile photo deleted successfully");
-      }
-
-      const filesInfo: {
-        originalName: string;
-        type: string;
-        r2Name: string;
-      } = {
-        originalName: reqFile.profilePhoto.name,
-        type: reqFile.profilePhoto.type,
-        r2Name: reqFile.profilePhoto.filename,
-      }
-
-      if (user.role === "worker" && headers.get("platform") === "mobile") {
-        if (reqFile.profilePhoto === null || body.deleteProfilePhoto === "true") {
-          if (user.profilePhoto == null) return response.status(200).send("No profile photo to delete");
-          await s3Client.delete(`profile-photos/workers/${user.profilePhoto.r2Name}`);
-          await dbClient
-            .update(workers)
-            .set({
-              profilePhoto: null,
-              updatedAt: new Date(),
-            })
-            .where(eq(workers.workerId, user.workerId));
-
-          await UserCache.clearUserProfile(user.workerId, Role.WORKER);
-          return response.status(200).send("Profile photo deleted successfully");
-        }
-        
-        if (user.profilePhoto?.r2Name) {
-          await s3Client.delete(`profile-photos/workers/${user.profilePhoto.r2Name}`);
-        }
-
-        await s3Client.write(
-          `profile-photos/workers/${filesInfo.r2Name}`,
-          Bun.file(reqFile.profilePhoto.path),
-        );
-
-        await dbClient
-          .update(workers)
-          .set({
-            profilePhoto: filesInfo,
-            updatedAt: new Date(),
-          })
-          .where(eq(workers.workerId, user.workerId));
-
-        return response.status(200).send("Profile photo updated successfully");
-
-      }
-      if (user.role === "employer" && headers.get("platform") === "web-employer") {
-        if (reqFile.profilePhoto === null || body.deleteProfilePhoto === "true") {
-          if (user.employerPhoto == null) return response.status(200).send("No profile photo to delete");
-          await s3Client.delete(`profile-photos/employers/${user.employerPhoto.r2Name}`);
-          await dbClient
-            .update(employers)
-            .set({
-            employerPhoto: null,
-            updatedAt: new Date(),
-          })
-          .where(eq(employers.employerId, user.employerId));
-
-        await UserCache.clearUserProfile(user.employerId, Role.EMPLOYER);
-        return response.status(200).send("Profile photo deleted successfully");
-      }
-        if (user.employerPhoto?.r2Name) {
-          await s3Client.delete(`profile-photos/employers/${user.employerPhoto.r2Name}`);
-        }
-
-        await s3Client.write(
-          `profile-photos/employers/${filesInfo.r2Name}`,
-          Bun.file(reqFile.profilePhoto.path),
-        );
-
-        await dbClient
-          .update(employers)
-          .set({
-            employerPhoto: filesInfo,
-            updatedAt: new Date(),
-          })
-          .where(eq(employers.employerId, user.employerId));
-
-        return response.status(200).send("Profile photo updated successfully");
-      }
-
-      return response.status(400).send("Platform requiered or mismatch");
-    } catch (error) {
-      console.error("Error updating profile photo:", error);
-      return response.status(500).send("Internal server error");
-    } finally {
-      if( reqFile.profilePhoto ){
-        FileManager.cleanupTempFiles([reqFile.profilePhoto]);
-      }
-    }
-  }
-);
-
-router.get("/employer/verification-documents", authenticated, async ({ user, response }) => {
-  if (!user || user.role !== "employer") {
-    return response.status(403).send("Forbidden: Employer access required.");
-  }
-
-  const employer = user; // user object is the employer object from authenticated middleware
-
-  if (!employer.verificationDocuments || typeof employer.verificationDocuments !== 'string') {
-    console.log(`Employer ${employer.employerId} has no verification documents or format is incorrect.`);
-    return response.status(200).json([]); // Return empty array if no documents
-  }
-
+// Update Password
+router.put("/update/password", authenticated, async (c) => {
   try {
-    const documentsArray = JSON.parse(employer.verificationDocuments);
-    if (!Array.isArray(documentsArray)) {
-      console.error(`Error parsing verificationDocuments for employer ${employer.employerId}: Not an array.`);
-      return response.status(500).send("Error processing verification documents.");
+    const user = c.get("user");
+    const body = await c.req.json();
+    const { currentPassword, newPassword } = body;
+
+    if (!currentPassword || !newPassword) {
+      return c.text("Current and new passwords are required", 400);
     }
 
-    const documentsWithUrls = await Promise.all(
-      documentsArray.map(async (doc: any) => {
-        if (doc?.r2Name && employer.identificationType) {
-          const filePath = `documents/${employer.identificationType}/${doc.r2Name}`;
-          const url = await FileManager.getPresignedUrl(filePath);
-          if (url) {
+    if (currentPassword === newPassword) {
+      return c.text("New password cannot be the same as current password", 400);
+    }
+
+    const validation = updatePasswordSchema.safeParse(body);
+    if (!validation.success) {
+      return c.json(
+        {
+          message: "Validation failed",
+          errors: validation.error.issues,
+        },
+        400
+      );
+    }
+
+    if (user.role === Role.WORKER) {
+      const worker = await dbClient.query.workers.findFirst({
+        where: eq(workers.workerId, user.workerId),
+      });
+
+      if (!worker) {
+        return c.text("Worker not found", 404);
+      }
+
+      const passwordCorrect = await verify(worker.password, currentPassword, argon2Config);
+      if (!passwordCorrect) {
+        return c.text("Current password is incorrect", 401);
+      }
+
+      const hashedNewPassword = await argon2hash(newPassword, argon2Config);
+
+      await dbClient.update(workers).set({ password: hashedNewPassword, updatedAt: new Date() }).where(eq(workers.workerId, user.workerId));
+
+      return c.text("Password updated successfully");
+    } else if (user.role === Role.EMPLOYER) {
+      const employer = await dbClient.query.employers.findFirst({
+        where: eq(employers.employerId, user.employerId),
+      });
+
+      if (!employer) {
+        return c.text("Employer not found", 404);
+      }
+
+      const passwordCorrect = await verify(employer.password, currentPassword, argon2Config);
+      if (!passwordCorrect) {
+        return c.text("Current password is incorrect", 401);
+      }
+
+      const hashedNewPassword = await argon2hash(newPassword, argon2Config);
+
+      await dbClient.update(employers).set({ password: hashedNewPassword, updatedAt: new Date() }).where(eq(employers.employerId, user.employerId));
+
+      return c.text("Password updated successfully");
+    } else {
+      return c.text("Invalid user role for password update", 400);
+    }
+  } catch (error) {
+    console.error("Error updating password:", error);
+    return c.text("Internal server error", 500);
+  }
+});
+
+// Update Identification Documents
+router.put("/update/identification", authenticated, uploadDocument, async (c) => {
+  try {
+    const user = c.get("user");
+    const uploadedFilesObj = c.get("uploadedFiles") as Record<string, any>;
+
+    if (!uploadedFilesObj) {
+      return c.text("沒有上傳文件", 400);
+    }
+
+    // 收集所有上傳的文件
+    const uploadedFiles: any[] = [];
+    if (uploadedFilesObj.verficationDocument) {
+      const files = Array.isArray(uploadedFilesObj.verficationDocument)
+        ? uploadedFilesObj.verficationDocument
+        : [uploadedFilesObj.verficationDocument];
+      uploadedFiles.push(...files);
+    }
+    if (uploadedFilesObj.identificationDocument) {
+      const files = Array.isArray(uploadedFilesObj.identificationDocument)
+        ? uploadedFilesObj.identificationDocument
+        : [uploadedFilesObj.identificationDocument];
+      uploadedFiles.push(...files);
+    }
+
+    if (uploadedFiles.length === 0) {
+      return c.text("沒有上傳文件", 400);
+    }
+
+    // 只處理雇主的身份證明文件更新
+    if (user.role !== Role.EMPLOYER) {
+      return c.text("只有雇主可以更新身份證明文件", 403);
+    }
+
+    // 處理上傳的文件
+    const documentUrls = [];
+
+    // 上傳文件到 S3
+    try {
+      await Promise.all(
+        uploadedFiles.map(async (file) => {
+          const currentFile = Bun.file(file.path);
+
+          // 檢查檔案是否存在
+          if (!(await currentFile.exists())) {
+            throw new Error(`檔案不存在: ${file.path}`);
+          }
+
+          await s3Client.write(`identification/${user.userId}/${file.filename}`, currentFile);
+          console.log(`身份證明文件 ${file.name} 上傳成功`);
+        }),
+      );
+    } catch (uploadError) {
+      console.error("上傳身份證明文件時出錯:", uploadError);
+      FileManager.cleanupTempFiles(uploadedFiles);
+      return c.text("文件上傳失敗", 500);
+    }
+
+    // 建立文件資訊
+    for (const file of uploadedFiles) {
+      // 驗證檔案物件的完整性
+      if (!file || !file.filename || !file.name) {
+        console.error('❌ 驗證文件檔案物件不完整:', file);
+        FileManager.cleanupTempFiles(uploadedFiles);
+        return c.text("文件資料不完整", 400);
+      }
+
+      const docData = {
+        originalName: file.name,
+        r2Name: file.filename, // 使用 r2Name 保持一致性
+        type: file.type,
+        size: file.size,
+      };
+
+      // 驗證 docData 不包含 URL
+      if (docData.r2Name && (docData.r2Name.includes('http') || docData.r2Name.includes('presigned'))) {
+        console.error('❌ 檢測到嘗試儲存 URL 到驗證文件資料庫:', docData);
+        FileManager.cleanupTempFiles(uploadedFiles);
+        return c.text("文件資料格式錯誤", 400);
+      }
+
+      console.log('✅ 驗證文件資料:', docData);
+      documentUrls.push(docData);
+    }
+
+    // 更新雇主的身份證明文件
+    await dbClient
+      .update(employers)
+      .set({
+        verificationDocuments: documentUrls,
+        updatedAt: new Date(),
+      })
+      .where(eq(employers.employerId, user.userId));
+
+    // 清理臨時文件
+    FileManager.cleanupTempFiles(uploadedFiles);
+
+    return c.json({
+      message: "身份證明文件更新成功",
+      documents: documentUrls,
+    });
+  } catch (error) {
+    console.error("更新身份證明文件時出錯:", error);
+    return c.text("伺服器內部錯誤", 500);
+  }
+});
+
+// Update Profile Photo
+router.put("/update/profilePhoto", authenticated, uploadProfilePhoto, async (c) => {
+  try {
+    const user = c.get("user");
+    const uploadedFilesObj = c.get("uploadedFiles") as Record<string, any>;
+
+    if (!uploadedFilesObj || !uploadedFilesObj.profilePhoto) {
+      return c.text("沒有上傳照片", 400);
+    }
+
+    const photoFile = uploadedFilesObj.profilePhoto; // profilePhoto 是單個檔案
+
+    // 驗證檔案物件的完整性
+    if (!photoFile || !photoFile.filename || !photoFile.name || !photoFile.path) {
+      console.error('❌ 個人照片檔案物件不完整:', photoFile);
+      return c.text("檔案資料不完整", 400);
+    }
+
+    console.log('✅ 個人照片檔案資料:', {
+      name: photoFile.name,
+      filename: photoFile.filename,
+      type: photoFile.type,
+      size: photoFile.size
+    });
+
+    // 上傳照片到 S3
+    try {
+      const currentFile = Bun.file(photoFile.path);
+
+      // 檢查檔案是否存在
+      if (!(await currentFile.exists())) {
+        throw new Error(`檔案不存在: ${photoFile.path}`);
+      }
+
+      // 根據用戶角色決定上傳路徑
+      const uploadPath = user.role === Role.WORKER
+        ? `profile-photos/workers/${photoFile.filename}`
+        : `profile-photos/employers/${photoFile.filename}`;
+
+      await s3Client.write(uploadPath, currentFile);
+      console.log(`個人照片 ${photoFile.name} 上傳成功`);
+    } catch (uploadError) {
+      console.error("上傳個人照片時出錯:", uploadError);
+      FileManager.cleanupTempFiles([photoFile]);
+      return c.text("照片上傳失敗", 500);
+    }
+
+    const photoData = {
+      originalName: photoFile.name,
+      type: photoFile.type,
+      r2Name: photoFile.filename, // 使用 r2Name 而不是 filename
+    };
+
+    // 驗證 photoData 不包含 URL
+    if (photoData.r2Name && (photoData.r2Name.includes('http') || photoData.r2Name.includes('presigned'))) {
+      console.error('❌ 檢測到嘗試儲存 URL 到資料庫:', photoData);
+      return c.text("檔案資料格式錯誤", 400);
+    }
+
+    // 根據用戶角色更新對應的照片
+    if (user.role === Role.WORKER) {
+      await dbClient
+        .update(workers)
+        .set({
+          profilePhoto: photoData,
+          updatedAt: new Date(),
+        })
+        .where(eq(workers.workerId, user.userId));
+    } else if (user.role === Role.EMPLOYER) {
+      await dbClient
+        .update(employers)
+        .set({
+          employerPhoto: photoData,
+          updatedAt: new Date(),
+        })
+        .where(eq(employers.employerId, user.userId));
+    } else {
+      return c.text("無效的用戶角色", 400);
+    }
+
+    // 清理臨時文件
+    FileManager.cleanupTempFiles([photoFile]);
+
+    return c.json({
+      message: "個人照片更新成功",
+      photo: photoData,
+    });
+  } catch (error) {
+    console.error("更新個人照片時出錯:", error);
+    return c.text("伺服器內部錯誤", 500);
+  }
+});
+
+// Get Employer Verification Documents
+router.get("/employer/verification-documents", authenticated, requireEmployer, async (c) => {
+  try {
+    const user = c.get("user");
+    const employer = await dbClient.query.employers.findFirst({
+      where: eq(employers.employerId, user.userId),
+      columns: {
+        password: false, // 排除密碼
+      },
+    });
+
+    if (!employer) {
+      return c.text("雇主不存在", 404);
+    }
+
+    // 獲取驗證文件的預簽名 URL
+    let documentsWithUrls = [];
+
+    if (employer.verificationDocuments && Array.isArray(employer.verificationDocuments)) {
+      console.log(`正在為 employer ${user.userId} 處理 ${employer.verificationDocuments.length} 個驗證文件`);
+      documentsWithUrls = await Promise.all(
+        employer.verificationDocuments.map(async (doc: any, index: number) => {
+          if (!doc || !doc.r2Name) {
+            console.warn(`驗證文件 ${index} 缺少 r2Name 屬性:`, doc);
             return {
-              originalName: doc.originalName,
-              type: doc.type,
-              url: url,
+              ...doc,
+              presignedUrl: null,
+              error: "文件資料不完整"
             };
           }
-          console.warn(`Failed to generate presigned URL for document ${doc.r2Name} of employer ${employer.employerId}`);
-          // Return the document without a URL if generation fails, or omit it
-          return {
-            originalName: doc.originalName,
-            type: doc.type,
-            url: null, // Explicitly set URL to null
-            error: "Failed to generate URL for this document.",
-          };
 
-        }
-        // If doc is malformed or r2Name is missing, filter it out or return with error
-        return null;
-      })
-    );
+          const presignedUrl = await FileManager.getPresignedUrl(`identification/${user.userId}/${doc.r2Name}`);
 
-    // Filter out any null entries that resulted from malformed doc objects
-    const validDocuments = documentsWithUrls.filter(doc => doc !== null);
+          if (presignedUrl) {
+            return { ...doc, presignedUrl };
+          } else {
+            console.warn(`❌ 驗證文件 URL 生成失敗: ${doc.r2Name}`);
+            return {
+              ...doc,
+              presignedUrl: null,
+              error: "URL 生成失敗"
+            };
+          }
+        })
+      );
+    } else {
+      console.log(`Employer ${user.userId} 沒有驗證文件或格式不正確`);
+    }
 
-    return response.status(200).json(validDocuments);
+    return c.json({
+      employerId: employer.employerId,
+      employerName: employer.employerName,
+      branchName: employer.branchName,
+      industryType: employer.industryType,
+      approvalStatus: employer.approvalStatus,
+      identificationType: employer.identificationType,
+      identificationNumber: employer.identificationNumber,
+      verificationDocuments: documentsWithUrls,
+      employerPhoto: employer.employerPhoto,
+    });
   } catch (error) {
-    console.error(`Error processing verification documents for employer ${employer.employerId}:`, error);
-    return response.status(500).send("Internal server error while processing documents.");
+    console.error("獲取雇主驗證文件時出錯:", error);
+    return c.text("伺服器內部錯誤", 500);
   }
 });
 

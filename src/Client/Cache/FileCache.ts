@@ -1,6 +1,6 @@
 import { S3Client } from "bun";
-import { CacheManager } from "./CacheManager.ts";
-import { CACHE_PREFIXES, CACHE_TTL } from "./CacheConfig.ts";
+import { CacheManager } from "./CacheManager";
+import { CACHE_PREFIXES, CACHE_TTL } from "./CacheConfig";
 
 // S3 客戶端配置
 export const s3Client = new S3Client({
@@ -30,12 +30,18 @@ export class FileManager {
       return null;
     }
 
+    if (typeof filePath !== 'string' || filePath.trim() === '') {
+      console.warn(`getPresignedUrl called with invalid filePath: ${typeof filePath} - "${filePath}"`);
+      return null;
+    }
+
     try {
       // 檢查快取
       const key = this.PREFIX + filePath;
       const cachedUrl = await CacheManager.get<string>(key);
 
       if (cachedUrl) {
+        console.log(`✅ 從快取獲取 presigned URL: ${filePath}`);
         return cachedUrl;
       }
 
@@ -44,22 +50,29 @@ export class FileManager {
         expires: expiresIn,
       });
 
-      const finalUrl = typeof signedRequestResult === "object" && signedRequestResult.url 
-        ? signedRequestResult.url 
+      const finalUrl = typeof signedRequestResult === "object" && signedRequestResult.url
+        ? signedRequestResult.url
         : signedRequestResult;
 
-      if (!finalUrl) {
-        console.error(`Failed to generate presigned URL for ${filePath}`);
+      if (!finalUrl || typeof finalUrl !== 'string') {
+        console.error(`❌ 生成 presigned URL 失敗，返回值無效: ${filePath}`, {
+          result: signedRequestResult,
+          finalUrl,
+          type: typeof finalUrl
+        });
         return null;
       }
 
       // 快取新生成的 URL
       await CacheManager.set(key, finalUrl, this.DEFAULT_TTL);
-      console.log(`已生成並快取 presigned URL: ${filePath}`);
+      console.log(`✅ 已生成並快取 presigned URL: ${filePath}`);
 
       return finalUrl;
     } catch (error) {
-      console.error(`Error getting presigned URL for ${filePath}:`, error);
+      console.error(`❌ 生成 presigned URL 時發生錯誤: ${filePath}`, {
+        error: error instanceof Error ? error.message : error,
+        stack: error instanceof Error ? error.stack : undefined
+      });
       return null;
     }
   }
@@ -71,9 +84,9 @@ export class FileManager {
     try {
       const key = this.PREFIX + filename;
       await CacheManager.delete(key);
-      console.log(`已刪除 presigned URL 快取: ${filename}`);
+      console.log(`✅ 已刪除 presigned URL 快取: ${filename}`);
     } catch (error) {
-      console.error(`刪除快取失敗 ${filename}:`, error);
+      console.error(`❌ 刪除快取失敗 ${filename}:`, error);
     }
   }
 

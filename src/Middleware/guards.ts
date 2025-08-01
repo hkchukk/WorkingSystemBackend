@@ -7,10 +7,6 @@ export const requireRole = (...roles: Role[]) => {
   return createMiddleware<HonoGenericContext>(async (c, next) => {
     const user = c.get("user");
     
-    if (!user) {
-      return c.text("需要登入", 401);
-    }
-
     if (!roles.includes(user.role)) {
       const roleNames = {
         [Role.WORKER]: "打工者",

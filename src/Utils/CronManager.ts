@@ -65,7 +65,6 @@ export class CronManager {
       // 檢查任務是否已存在
       const exists = await CronManager.checkCronJobExists(jobName);
       if (exists) {
-        console.log(`✅ Cron 任務 ${jobName} 已存在`);
         return true;
       }
 
@@ -182,7 +181,6 @@ export class CronManager {
       });
     }
 
-    console.log("✅ pg_cron 任務初始化完成");
     return true;
   }
 }

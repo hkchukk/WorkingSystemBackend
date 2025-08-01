@@ -99,7 +99,7 @@ router.get("/unread", authenticated, async (c) => {
 });
 
 // 標記通知為已讀
-router.put("/mark-as-read/", authenticated, zValidator("json", markAsReadSchema), async (c) => {
+router.put("/mark-as-read", authenticated, zValidator("json", markAsReadSchema), async (c) => {
     const user = c.get("user");
   try {
     const { notificationIds } = c.req.valid("json");
@@ -141,7 +141,7 @@ router.put("/mark-as-read/", authenticated, zValidator("json", markAsReadSchema)
 });
 
 // 建立通知 (管理員或系統內部使用)
-router.post("/create/", authenticated, zValidator("json", createNotificationSchema), async (c) => {
+router.post("/create", authenticated, zValidator("json", createNotificationSchema), async (c) => {
     const body = c.req.valid("json");
   try {
     const newNotification = await dbClient
@@ -168,7 +168,7 @@ router.post("/create/", authenticated, zValidator("json", createNotificationSche
 });
 
 // 批量建立通知 (管理員或系統內部使用)
-router.post("/create-batch/", authenticated, zValidator("json", createBatchNotificationSchema), async (c) => {
+router.post("/create-batch", authenticated, zValidator("json", createBatchNotificationSchema), async (c) => {
   try {
     const { receiverIds, title, message, type } = c.req.valid("json");
 
@@ -195,7 +195,7 @@ router.post("/create-batch/", authenticated, zValidator("json", createBatchNotif
 });
 
 // 發送通知給指定用戶群組 (管理員或系統內部使用)
-router.post("/create-group/", authenticated, zValidator("json", createGroupNotificationSchema), async (c) => {
+router.post("/create-group", authenticated, zValidator("json", createGroupNotificationSchema), async (c) => {
   try {
     const { groups, title, message, type } = c.req.valid("json");
 

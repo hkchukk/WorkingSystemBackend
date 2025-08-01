@@ -483,9 +483,9 @@ router.get("/my-ratings/worker", authenticated, requireWorker, async (c) => {
 
 /**
  * 商家獲取別人給自己的所有評分
- * GET /rating/received-ratings/employer/
+ * GET /rating/received-ratings/employer
  */
-router.get("/received-ratings/employer/", authenticated, requireEmployer, async (c) => {
+router.get("/received-ratings/employer", authenticated, requireEmployer, async (c) => {
   try {
     const user = c.get("user");
     const limit = c.req.query("limit") || "10";

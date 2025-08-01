@@ -28,12 +28,12 @@ interface FileUploadConfig {
 export function createFileUploadMiddleware(configs: FileUploadConfig[]) {
   return createMiddleware<HonoGenericContext>(async (c, next) => {
     try {
-      const body = await c.req.parseBody();
+      const body = await c.req.parseBody({ all: true });
       const uploadedFiles: Record<string, UploadedFile | UploadedFile[]> = {};
 
       for (const config of configs) {
         const files = body[config.name];
-        
+
         if (!files) {
           uploadedFiles[config.name] = [];
           continue;
@@ -42,7 +42,10 @@ export function createFileUploadMiddleware(configs: FileUploadConfig[]) {
         // 處理單個或多個文件
         const fileArray = Array.isArray(files) ? files : [files];
 
-        console.log(`📁 處理 ${config.name} 檔案上傳: 收到 ${fileArray.length} 個檔案，限制 ${config.maxCount} 個`);
+        // 確定實際使用的欄位名稱
+        const actualFieldName = body[config.name] ? config.name : config.name + '[]';
+
+        console.log(`📁 處理 ${config.name} 檔案上傳 (實際欄位: ${actualFieldName}): 收到 ${fileArray.length} 個檔案，限制 ${config.maxCount} 個`);
 
         // 驗證文件數量
         if (fileArray.length > config.maxCount) {
@@ -121,14 +124,6 @@ export function createFileUploadMiddleware(configs: FileUploadConfig[]) {
       // 將文件信息添加到 context
       c.set('uploadedFiles', uploadedFiles);
 
-      // 添加調試日誌
-      console.log('檔案上傳中間件處理完成:', Object.keys(uploadedFiles).map(key => ({
-        field: key,
-        hasFile: uploadedFiles[key] !== null && uploadedFiles[key] !== undefined,
-        isArray: Array.isArray(uploadedFiles[key]),
-        count: Array.isArray(uploadedFiles[key]) ? uploadedFiles[key].length : (uploadedFiles[key] ? 1 : 0)
-      })));
-
       await next();
     } catch (error) {
       console.error('File upload error:', error);
@@ -175,5 +170,4 @@ export const uploadEnvironmentPhotos = createFileUploadMiddleware([
   }
 ]);
 
-// 使用分離的 FileManager
 export { FileManager } from "../Client/Cache/FileCache";

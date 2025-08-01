@@ -360,11 +360,121 @@ router.get("/worker/calendar", authenticated, requireWorker, async (c) => {
   }
 });
 
+/**
+ * Employer 查看所有工作的申請
+ * GET /application/gig/all
+ */
+router.get("/gig/all", authenticated, requireEmployer, requireApprovedEmployer, async (c) => {
+  try {
+    const user = c.get("user");
+    const status = c.req.query("status");
+    const limit = c.req.query("limit") || "10";
+    const offset = c.req.query("offset") || "0";
+
+    // 先查詢該商家的所有工作 ID
+    const userGigs = await dbClient.query.gigs.findMany({
+      where: eq(gigs.employerId, user.employerId),
+      columns: { gigId: true },
+    });
+
+    const userGigIds = userGigs.map(gig => gig.gigId);
+
+    if (userGigIds.length === 0) {
+      // 如果沒有工作，直接返回空結果
+      return c.json({
+        message: "沒有找到任何申請記錄",
+      }, 200);
+    }
+
+    // 查詢所有工作的申請記錄
+    let applicationWhereConditions = [];
+
+    // 單一狀態過濾：?status=pending 或不傳參數顯示全部
+    let applicationStatusConditions = null;
+
+    if (status && ["pending", "approved", "rejected", "cancelled"].includes(status)) {
+      applicationStatusConditions = eq(gigApplications.status, status as "pending" | "approved" | "rejected" | "cancelled");
+    }
+
+    // 建立申請查詢條件
+    if (userGigIds.length === 1) {
+      applicationWhereConditions.push(eq(gigApplications.gigId, userGigIds[0]));
+    } else {
+      const gigIdConditions = userGigIds.map(id => eq(gigApplications.gigId, id));
+      applicationWhereConditions.push(or(...gigIdConditions));
+    }
+
+    // 添加狀態過濾條件
+    if (applicationStatusConditions) {
+      applicationWhereConditions.push(applicationStatusConditions);
+    }
+
+    const requestLimit = Number.parseInt(limit);
+    const requestOffset = Number.parseInt(offset);
+
+    // 查詢申請記錄
+    const applications = await dbClient.query.gigApplications.findMany({
+      with: {
+        gig: true,
+      },
+      where: and(...applicationWhereConditions),
+      orderBy: [desc(gigApplications.createdAt)],
+      limit: requestLimit + 1, // 多查一筆來判斷 hasMore
+      offset: requestOffset,
+    });
+
+    // 判斷是否有更多數據
+    const hasMore = applications.length > requestLimit;
+    const actualApplications = hasMore ? applications.slice(0, requestLimit) : applications;
+
+    // 按工作分組並整合統計與申請資料
+    const gigsWithApplications = actualApplications.reduce((acc: Record<string, any>, app) => {
+      const gigId = app.gigId;
+
+      acc[gigId] ??= {
+        gigId: app.gig.gigId,
+        gigTitle: app.gig.title,
+        applicationCount: 0,
+        applications: []
+      };
+
+      acc[gigId].applicationCount++;
+      acc[gigId].applications.push({
+        applicationId: app.applicationId,
+        status: app.status,
+        appliedAt: app.createdAt,
+      });
+
+      return acc;
+    }, {});
+
+    return c.json({
+      message: "獲取所有申請記錄成功",
+      data: {
+        gigs: Object.values(gigsWithApplications),
+        pagination: {
+          limit: requestLimit,
+          offset: requestOffset,
+          hasMore: hasMore,
+          returned: actualApplications.length,
+        },
+      },
+    }, 200);
+
+  } catch (error) {
+    console.error("查看所有申請時發生錯誤:", error);
+    return c.json({
+      message: "獲取所有申請失敗",
+      error: error instanceof Error ? error.message : "未知錯誤",
+    }, 500);
+  }
+});
+
 // ========== Employer 相關路由 ==========
 
 /**
  * Employer 查看工作申請詳情
- * GET /application/gig/:gigId
+ * GET /application/gig/:gigId/
  */
 router.get("/gig/:gigId", authenticated, requireEmployer, requireApprovedEmployer, async (c) => {
   try {
@@ -551,116 +661,6 @@ router.put(
     }
   }
 );
-
-/**
- * Employer 查看所有工作的申請
- * GET /application/gig/all/
- */
-router.get("/gig/all/", authenticated, requireEmployer, requireApprovedEmployer, async (c) => {
-  try {
-    const user = c.get("user");
-    const status = c.req.query("status");
-    const limit = c.req.query("limit") || "10";
-    const offset = c.req.query("offset") || "0";
-
-    // 先查詢該商家的所有工作 ID
-    const userGigs = await dbClient.query.gigs.findMany({
-      where: eq(gigs.employerId, user.employerId),
-      columns: { gigId: true },
-    });
-
-    const userGigIds = userGigs.map(gig => gig.gigId);
-
-    if (userGigIds.length === 0) {
-      // 如果沒有工作，直接返回空結果
-      return c.json({
-        message: "沒有找到任何申請記錄",
-      }, 200);
-    }
-
-    // 查詢所有工作的申請記錄
-    let applicationWhereConditions = [];
-
-    // 單一狀態過濾：?status=pending 或不傳參數顯示全部
-    let applicationStatusConditions = null;
-
-    if (status && ["pending", "approved", "rejected", "cancelled"].includes(status)) {
-      applicationStatusConditions = eq(gigApplications.status, status as "pending" | "approved" | "rejected" | "cancelled");
-    }
-
-    // 建立申請查詢條件
-    if (userGigIds.length === 1) {
-      applicationWhereConditions.push(eq(gigApplications.gigId, userGigIds[0]));
-    } else {
-      const gigIdConditions = userGigIds.map(id => eq(gigApplications.gigId, id));
-      applicationWhereConditions.push(or(...gigIdConditions));
-    }
-
-    // 添加狀態過濾條件
-    if (applicationStatusConditions) {
-      applicationWhereConditions.push(applicationStatusConditions);
-    }
-
-    const requestLimit = Number.parseInt(limit);
-    const requestOffset = Number.parseInt(offset);
-
-    // 查詢申請記錄
-    const applications = await dbClient.query.gigApplications.findMany({
-      with: {
-        gig: true,
-      },
-      where: and(...applicationWhereConditions),
-      orderBy: [desc(gigApplications.createdAt)],
-      limit: requestLimit + 1, // 多查一筆來判斷 hasMore
-      offset: requestOffset,
-    });
-
-    // 判斷是否有更多數據
-    const hasMore = applications.length > requestLimit;
-    const actualApplications = hasMore ? applications.slice(0, requestLimit) : applications;
-
-    // 按工作分組並整合統計與申請資料
-    const gigsWithApplications = actualApplications.reduce((acc: Record<string, any>, app) => {
-      const gigId = app.gigId;
-
-      acc[gigId] ??= {
-        gigId: app.gig.gigId,
-        gigTitle: app.gig.title,
-        applicationCount: 0,
-        applications: []
-      };
-
-      acc[gigId].applicationCount++;
-      acc[gigId].applications.push({
-        applicationId: app.applicationId,
-        status: app.status,
-        appliedAt: app.createdAt,
-      });
-
-      return acc;
-    }, {});
-
-    return c.json({
-      message: "獲取所有申請記錄成功",
-      data: {
-        gigs: Object.values(gigsWithApplications),
-        pagination: {
-          limit: requestLimit,
-          offset: requestOffset,
-          hasMore: hasMore,
-          returned: actualApplications.length,
-        },
-      },
-    }, 200);
-
-  } catch (error) {
-    console.error("查看所有申請時發生錯誤:", error);
-    return c.json({
-      message: "獲取所有申請失敗",
-      error: error instanceof Error ? error.message : "未知錯誤",
-    }, 500);
-  }
-});
 
 // 導出路由
 export default { path: "/application", router } as IRouter;

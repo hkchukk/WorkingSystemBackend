@@ -1,7 +1,7 @@
 {
   "name": "working-system-backend",
   "scripts": {
-    "dev": "bun run --bun --hot src/index.ts",
+    "dev": "bun run --bun --watch src/index.ts",
     "start": "bun run --bun src/index.ts"
   },
   "dependencies": {

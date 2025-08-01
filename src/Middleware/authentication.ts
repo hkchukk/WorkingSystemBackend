@@ -11,9 +11,7 @@ import { UserCache } from "../Client/Cache/Index";
 
 export const authenticate = createMiddleware<HonoGenericContext>(async (c, next) => {
     if (c.get("session").get("id")) {
-        if (await deserializeUser(c.get("session"))) {
-            return next();
-        }
+        return c.text("已經登入", 401);
     }
 
     const { platform } = c.req.header();

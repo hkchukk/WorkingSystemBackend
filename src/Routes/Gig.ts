@@ -267,6 +267,161 @@ router.delete("/deleteFile/:filename", authenticated, async (c) => {
   }
 });
 
+// 獲取所有可用工作
+router.get("/public", async (c) => {
+  try {
+    const limit = c.req.query("limit") || "10";
+    const page = c.req.query("page") || "1";
+    const city = c.req.query("city");
+    const district = c.req.query("district");
+    const minRate = c.req.query("minRate");
+    const maxRate = c.req.query("maxRate");
+    const dateStart = c.req.query("dateStart");
+
+    // 驗證 city 和 district 必須成對
+    if (district && !city) {
+      return c.json(
+        {
+          error: "提供區域時必須同時提供城市",
+        },
+        400
+      );
+    }
+
+    const requestLimit = Number.parseInt(limit);
+    const requestPage = Number.parseInt(page);
+    const minRateFilter = minRate ? Number.parseInt(minRate) : null;
+    const maxRateFilter = maxRate ? Number.parseInt(maxRate) : null;
+
+    /*
+		// 生成快取鍵
+		const filters = `public_${city || "all"}_${district || "all"}_${minRateFilter || "any"}_${maxRateFilter || "any"}_${dateStart || "any"}`;
+		
+		// 檢查快取
+		let cachedData = await GigCache.getGigList(filters, requestPage);
+
+		if (cachedData) {
+			return c.json(cachedData, 200);
+		}
+		*/
+
+    // 處理日期邏輯
+    const today = moment().format("YYYY-MM-DD");
+    const searchDateStart = dateStart || today;
+
+    // 建立查詢條件
+    const whereConditions = [
+      eq(gigs.isActive, true),
+      lte(gigs.publishedAt, today),
+      sql`(${gigs.unlistedAt} IS NULL OR ${gigs.unlistedAt} >= ${today})`,
+      gte(gigs.dateEnd, searchDateStart),
+    ];
+
+    city ? whereConditions.push(eq(gigs.city, city)) : null;
+    district ? whereConditions.push(eq(gigs.district, district)) : null;
+    minRateFilter ? whereConditions.push(gte(gigs.hourlyRate, minRateFilter)) : null;
+    maxRateFilter ? whereConditions.push(lte(gigs.hourlyRate, maxRateFilter)) : null;
+
+    const availableGigs = await dbClient.query.gigs.findMany({
+      where: and(...whereConditions),
+      orderBy: [
+        sql`CASE WHEN ${gigs.dateStart}::date >= ${today}::date THEN 0 ELSE 1 END ASC`,
+        sql`ABS(${gigs.dateStart}::date - ${today}::date) ASC`,
+      ],
+      limit: requestLimit + 1, // 多查一筆來確認是否有更多資料
+      offset: requestLimit * (requestPage - 1),
+      columns: {
+        gigId: true,
+        title: true,
+        hourlyRate: true,
+        city: true,
+        district: true,
+        updatedAt: true,
+      },
+    });
+
+    const hasMore = availableGigs.length > requestLimit;
+    hasMore ? availableGigs.pop() : null;
+
+    const response_data = {
+      gigs: availableGigs,
+      pagination: {
+        limit: requestLimit,
+        page: requestPage,
+        hasMore,
+        returned: availableGigs.length,
+      },
+      filters: {
+        city,
+        district,
+        minRate: minRateFilter,
+        maxRate: maxRateFilter,
+        dateStart: searchDateStart,
+      },
+    };
+
+    //await GigCache.setGigList(filters, requestPage, response_data);
+    return c.json(response_data, 200);
+  } catch (error) {
+    console.error("獲取工作列表時出錯:", error);
+    return c.text("伺服器內部錯誤", 500);
+  }
+});
+
+// 獲取單一可用工作（詳細版）
+router.get("/public/:gigId", async (c) => {
+  try {
+    const gigId = c.req.param("gigId");
+
+    if (!gigId) {
+      return c.json({ error: "Gig ID is required" }, 400);
+    }
+
+    const today = moment().format("YYYY-MM-DD");
+
+    const whereConditions = [
+      eq(gigs.gigId, gigId),
+      eq(gigs.isActive, true),
+      lte(gigs.publishedAt, today),
+      sql`(${gigs.unlistedAt} IS NULL OR ${gigs.unlistedAt} >= ${today})`,
+    ];
+
+    const gig = await dbClient.query.gigs.findFirst({
+      where: and(...whereConditions),
+      columns: {
+        isActive: false,
+        createdAt: false,
+      },
+      with: {
+        employer: {
+          columns: {
+            employerId: true,
+            employerName: true,
+            branchName: true,
+            industryType: true,
+            address: true,
+            employerPhoto: true,
+          },
+        },
+      },
+    });
+
+    if (!gig) {
+      return c.json({ message: "工作不存在或目前無法查看" }, 404);
+    }
+
+    const formattedGig = {
+      ...gig,
+      environmentPhotos: await formatEnvironmentPhotos(gig.environmentPhotos),
+    };
+
+    return c.json(formattedGig, 200);
+  } catch (error) {
+    console.error(`獲取詳細工作時出錯:`, error);
+    return c.text("伺服器內部錯誤", 500);
+  }
+});
+
 // 發佈新工作
 router.post(
   "/create",
@@ -708,161 +863,6 @@ router.patch("/:gigId/toggle-listing", authenticated, requireEmployer, requireAp
     );
   } catch (error) {
     console.error("切換工作上架狀態時出錯:", error);
-    return c.text("伺服器內部錯誤", 500);
-  }
-});
-
-// 獲取所有可用工作
-router.get("/public/", async (c) => {
-  try {
-    const limit = c.req.query("limit") || "10";
-    const page = c.req.query("page") || "1";
-    const city = c.req.query("city");
-    const district = c.req.query("district");
-    const minRate = c.req.query("minRate");
-    const maxRate = c.req.query("maxRate");
-    const dateStart = c.req.query("dateStart");
-
-    // 驗證 city 和 district 必須成對
-    if (district && !city) {
-      return c.json(
-        {
-          error: "提供區域時必須同時提供城市",
-        },
-        400
-      );
-    }
-
-    const requestLimit = Number.parseInt(limit);
-    const requestPage = Number.parseInt(page);
-    const minRateFilter = minRate ? Number.parseInt(minRate) : null;
-    const maxRateFilter = maxRate ? Number.parseInt(maxRate) : null;
-
-    /*
-		// 生成快取鍵
-		const filters = `public_${city || "all"}_${district || "all"}_${minRateFilter || "any"}_${maxRateFilter || "any"}_${dateStart || "any"}`;
-		
-		// 檢查快取
-		let cachedData = await GigCache.getGigList(filters, requestPage);
-
-		if (cachedData) {
-			return c.json(cachedData, 200);
-		}
-		*/
-
-    // 處理日期邏輯
-    const today = moment().format("YYYY-MM-DD");
-    const searchDateStart = dateStart || today;
-
-    // 建立查詢條件
-    const whereConditions = [
-      eq(gigs.isActive, true),
-      lte(gigs.publishedAt, today),
-      sql`(${gigs.unlistedAt} IS NULL OR ${gigs.unlistedAt} >= ${today})`,
-      gte(gigs.dateEnd, searchDateStart),
-    ];
-
-    city ? whereConditions.push(eq(gigs.city, city)) : null;
-    district ? whereConditions.push(eq(gigs.district, district)) : null;
-    minRateFilter ? whereConditions.push(gte(gigs.hourlyRate, minRateFilter)) : null;
-    maxRateFilter ? whereConditions.push(lte(gigs.hourlyRate, maxRateFilter)) : null;
-
-    const availableGigs = await dbClient.query.gigs.findMany({
-      where: and(...whereConditions),
-      orderBy: [
-        sql`CASE WHEN ${gigs.dateStart}::date >= ${today}::date THEN 0 ELSE 1 END ASC`,
-        sql`ABS(${gigs.dateStart}::date - ${today}::date) ASC`,
-      ],
-      limit: requestLimit + 1, // 多查一筆來確認是否有更多資料
-      offset: requestLimit * (requestPage - 1),
-      columns: {
-        gigId: true,
-        title: true,
-        hourlyRate: true,
-        city: true,
-        district: true,
-        updatedAt: true,
-      },
-    });
-
-    const hasMore = availableGigs.length > requestLimit;
-    hasMore ? availableGigs.pop() : null;
-
-    const response_data = {
-      gigs: availableGigs,
-      pagination: {
-        limit: requestLimit,
-        page: requestPage,
-        hasMore,
-        returned: availableGigs.length,
-      },
-      filters: {
-        city,
-        district,
-        minRate: minRateFilter,
-        maxRate: maxRateFilter,
-        dateStart: searchDateStart,
-      },
-    };
-
-    //await GigCache.setGigList(filters, requestPage, response_data);
-    return c.json(response_data, 200);
-  } catch (error) {
-    console.error("獲取工作列表時出錯:", error);
-    return c.text("伺服器內部錯誤", 500);
-  }
-});
-
-// 獲取單一可用工作（詳細版）
-router.get("/public/:gigId/", async (c) => {
-  try {
-    const gigId = c.req.param("gigId");
-
-    if (!gigId) {
-      return c.json({ error: "Gig ID is required" }, 400);
-    }
-
-    const today = moment().format("YYYY-MM-DD");
-
-    const whereConditions = [
-      eq(gigs.gigId, gigId),
-      eq(gigs.isActive, true),
-      lte(gigs.publishedAt, today),
-      sql`(${gigs.unlistedAt} IS NULL OR ${gigs.unlistedAt} >= ${today})`,
-    ];
-
-    const gig = await dbClient.query.gigs.findFirst({
-      where: and(...whereConditions),
-      columns: {
-        isActive: false,
-        createdAt: false,
-      },
-      with: {
-        employer: {
-          columns: {
-            employerId: true,
-            employerName: true,
-            branchName: true,
-            industryType: true,
-            address: true,
-            employerPhoto: true,
-          },
-        },
-      },
-    });
-
-    if (!gig) {
-      return c.json({ message: "工作不存在或目前無法查看" }, 404);
-    }
-
-    const formattedGig = {
-      ...gig,
-      environmentPhotos: await formatEnvironmentPhotos(gig.environmentPhotos),
-    };
-
-    return c.json(formattedGig, 200);
-  } catch (error) {
-    console.error(`獲取詳細工作時出錯:`, error);
     return c.text("伺服器內部錯誤", 500);
   }
 });

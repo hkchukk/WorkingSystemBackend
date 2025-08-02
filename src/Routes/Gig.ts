@@ -870,6 +870,10 @@ router.get("/employer/calendar", authenticated, requireEmployer, requireApproved
     const month = c.req.query("month");
     const dateStart = c.req.query("dateStart");
     const dateEnd = c.req.query("dateEnd");
+    const limit = c.req.query("limit") || "100";
+    const offset = c.req.query("offset") || "0";
+    const requestLimit = Number.parseInt(limit);
+    const requestOffset = Number.parseInt(offset);
 
     // 檢查是否提供了必要的日期參數
     const hasYearMonth = year && month;
@@ -888,7 +892,6 @@ router.get("/employer/calendar", authenticated, requireEmployer, requireApproved
     const whereConditions = [
       eq(gigs.employerId, user.employerId),
       eq(gigs.isActive, true),
-      lte(gigs.publishedAt, currentDate),
       sql`(${gigs.unlistedAt} IS NULL OR ${gigs.unlistedAt} >= ${currentDate})`,
     ];
 
@@ -938,17 +941,28 @@ router.get("/employer/calendar", authenticated, requireEmployer, requireApproved
         timeStart: true,
         timeEnd: true,
       },
+      limit: requestLimit + 1, // 多查一筆來判斷 hasMore
+      offset: requestOffset,
     });
+
+    // 判斷是否有更多數據
+    const hasMore = calendarGigs.length > requestLimit;
+    const actualCalendarGigs = hasMore ? calendarGigs.slice(0, requestLimit) : calendarGigs;
 
     return c.json(
       {
         gigs: calendarGigs,
-        count: calendarGigs.length,
         queryInfo: {
           year: year || null,
           month: month || null,
           dateStart: dateStart || null,
           dateEnd: dateEnd || null,
+        },
+        pagination: {
+          limit: requestLimit,
+          offset: requestOffset,
+          hasMore: hasMore,
+          returned: actualCalendarGigs.length,
         },
       },
       200

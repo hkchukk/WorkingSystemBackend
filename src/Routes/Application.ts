@@ -245,6 +245,10 @@ router.get("/worker/calendar", authenticated, requireWorker, async (c) => {
     const month = c.req.query("month");
     const dateStart = c.req.query("dateStart");
     const dateEnd = c.req.query("dateEnd");
+    const limit = c.req.query("limit") || "100";
+    const offset = c.req.query("offset") || "0";
+    const requestLimit = Number.parseInt(limit);
+    const requestOffset = Number.parseInt(offset);
 
     // 檢查是否提供了必要的日期參數
     const hasYearMonth = year && month;
@@ -321,9 +325,15 @@ router.get("/worker/calendar", authenticated, requireWorker, async (c) => {
       .innerJoin(gigs, eq(gigApplications.gigId, gigs.gigId))
       .innerJoin(employers, eq(gigs.employerId, employers.employerId))
       .where(and(...whereConditions))
-      .orderBy(gigs.dateStart, gigs.timeStart);
+      .orderBy(gigs.dateStart, gigs.timeStart)
+      .limit(requestLimit + 1) // 多查一筆來判斷 hasMore
+      .offset(requestOffset);
 
-    const calendarGigs = results.map(row => {
+    // 判斷是否有更多數據
+    const hasMore = results.length > requestLimit;
+    const actualResults = hasMore ? results.slice(0, requestLimit) : results;
+
+    const calendarGigs = actualResults.map(row => {
       return {
         gigId: row.gigId,
         title: row.title,
@@ -343,13 +353,18 @@ router.get("/worker/calendar", authenticated, requireWorker, async (c) => {
       message: "獲取 Worker 行事曆成功",
       data: {
         gigs: calendarGigs,
-        count: calendarGigs.length,
         queryInfo: {
           year: year || null,
           month: month || null,
           dateStart: dateStart || null,
           dateEnd: dateEnd || null,
-        }
+        },
+        pagination: {
+          limit: requestLimit,
+          offset: requestOffset,
+          hasMore: hasMore,
+          returned: actualResults.length,
+        },
       }
     }, 200);
 

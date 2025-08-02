@@ -21,28 +21,30 @@ import { Role } from "../Types/types";
 import { UserCache, FileManager, RatingCache, s3Client } from "../Client/Cache/Index";
 import NotificationHelper from "../Utils/NotificationHelper";
 import { requireEmployer } from "../Middleware/guards";
+import { promise } from "zod";
 
 const router = new Hono<HonoGenericContext>();
 
 // Worker Registration
-router.post("/register/worker", zValidator("json", workerSignupSchema), async (c) => {
+router.post("/register/worker", zValidator("form", workerSignupSchema), async (c) => {
   const platform = c.req.header("platform");
   if (!platform?.length) {
     return c.text("Platform is required", 400);
   }
 
-  const body = c.req.valid("json");
+  const body = c.req.valid("form");
   const {
     email,
     password,
     firstName,
     lastName,
     phoneNumber,
-    highestEducation = "大學",
+    highestEducation = "其他",
     schoolName,
     major,
     studyStatus = "就讀中",
     certificates = [],
+    jobExperience = [],
   } = body;
 
   const existingUser = await dbClient.query.workers.findFirst({
@@ -68,6 +70,7 @@ router.post("/register/worker", zValidator("json", workerSignupSchema), async (c
       major,
       studyStatus,
       certificates,
+      jobExperience,
     })
     .returning();
 
@@ -91,19 +94,14 @@ router.post("/register/worker", zValidator("json", workerSignupSchema), async (c
 });
 
 // Employer Registration
-router.post("/register/employer", uploadDocument, zValidator("json", employerSignupSchema), async (c) => {
+router.post("/register/employer", uploadDocument, zValidator("form", employerSignupSchema), async (c) => {
   const uploadedFiles = c.get("uploadedFiles") as any[];
-  const body = c.req.valid("json");
+  const body = c.req.valid("form");
+  const fileType = (body.identificationType === "businessNo") ? "verficationDocument" : "identificationDocument";
+  const files = uploadedFiles[fileType] || [];
 
-  let files = null;
-  if (body.identificationType === "businessNo" && uploadedFiles?.find((f) => f.fieldName === "verficationDocument")) {
-    const verficationFiles = uploadedFiles.filter((f) => f.fieldName === "verficationDocument");
-    files = verficationFiles.length === 1 ? [verficationFiles[0]] : verficationFiles;
-  } else if (body.identificationType === "personalId" && uploadedFiles?.find((f) => f.fieldName === "identificationDocument")) {
-    const identificationFiles = uploadedFiles.filter((f) => f.fieldName === "identificationDocument");
-    files = identificationFiles.length === 1 ? [identificationFiles[0]] : identificationFiles;
-  } else {
-    return c.text("Invalid identification document", 400);
+  if(files.length === 0) {
+    return c.text("No files uploaded for verification", 400);
   }
 
   try {
@@ -190,6 +188,21 @@ router.post("/register/employer", uploadDocument, zValidator("json", employerSig
   }
 });
 
+// delete user
+router.delete("/delete", authenticated, async (c) => {
+  const user = c.get("user");
+  if (user.role === Role.WORKER) {
+    await dbClient.delete(workers).where(eq(workers.workerId, user.workerId));
+    await UserCache.clearUserProfile(user.workerId, Role.WORKER);
+    return c.text("Worker account deleted successfully", 200);
+  } else if (user.role === Role.EMPLOYER) {
+    await dbClient.delete(employers).where(eq(employers.employerId, user.employerId));
+    await UserCache.clearUserProfile(user.employerId, Role.EMPLOYER);
+    return c.text("Employer account deleted successfully", 200);
+  }
+  return c.text("Invalid user role for deletion", 400);
+});
+
 router.post("/login", zValidator("json", loginSchema), authenticate, async (c) => {
   // 認證成功後，獲取用戶資料
   const session = c.get("session");
@@ -254,14 +267,6 @@ router.get("/profile", authenticated, async (c) => {
           originalName: profilePhoto.originalName,
           type: profilePhoto.type,
         };
-      } else {
-        console.warn(`❌ Worker ${user.workerId} 照片 URL 生成失敗: ${profilePhoto.r2Name}`);
-        photoUrlData = {
-          url: null,
-          error: "照片 URL 生成失敗",
-          originalName: profilePhoto.originalName,
-          type: profilePhoto.type,
-        };
       }
     }
 
@@ -304,15 +309,39 @@ router.get("/profile", authenticated, async (c) => {
           originalName: employerPhoto.originalName,
           type: employerPhoto.type,
         };
-      } else {
-        console.warn(`❌ Employer ${user.employerId} 照片 URL 生成失敗: ${employerPhoto.r2Name}`);
-        photoUrlData = {
-          url: null,
-          error: "照片 URL 生成失敗",
-          originalName: employerPhoto.originalName,
-          type: employerPhoto.type,
-        };
       }
+    }
+
+    let documentsWithUrls = [];
+
+    if (user.verificationDocuments && Array.isArray(user.verificationDocuments)) {
+      documentsWithUrls = await Promise.all(
+        user.verificationDocuments.map(async (doc: any, index: number) => {
+          if (!doc || !doc.r2Name) {
+            console.warn(`驗證文件 ${index} 缺少 r2Name 屬性:`, doc);
+            return {
+              ...doc,
+              presignedUrl: null,
+              error: "文件資料不完整"
+            };
+          }
+
+          const presignedUrl = await FileManager.getPresignedUrl(`identification/${user.userId}/${doc.r2Name}`);
+
+          if (presignedUrl) {
+            return { ...doc, presignedUrl };
+          } else {
+            console.warn(`❌ 驗證文件 URL 生成失敗: ${doc.r2Name}`);
+            return {
+              ...doc,
+              presignedUrl: null,
+              error: "URL 生成失敗"
+            };
+          }
+        })
+      );
+    } else {
+      console.log(`Employer ${user.userId} 沒有驗證文件或格式不正確`);
     }
 
     let ratingStats = await RatingCache.getRatingStats(user.employerId, Role.EMPLOYER);
@@ -337,7 +366,7 @@ router.get("/profile", authenticated, async (c) => {
     return c.json({
       ...employerData,
       employerPhoto: photoUrlData,
-      verificationDocuments,
+      verificationDocuments: documentsWithUrls,
       ratingStats,
     });
   }
@@ -493,267 +522,135 @@ router.put("/update/password", authenticated, async (c) => {
 
 // Update Identification Documents
 router.put("/update/identification", authenticated, uploadDocument, async (c) => {
+  const user = c.get("user");
+  const uploadedFilesObj = c.get("uploadedFiles") as Record<string, any>;
+  const body = await c.req.parseBody();
+  const files = uploadedFilesObj[(body.identificationType === "businessNo") ? "verficationDocument" : "identificationDocument"] || [];
+
   try {
-    const user = c.get("user");
-    const uploadedFilesObj = c.get("uploadedFiles") as Record<string, any>;
-
-    if (!uploadedFilesObj) {
-      return c.text("沒有上傳文件", 400);
+    if (files.length === 0) {
+      return c.text("No files uploaded for verification", 400);
     }
 
-    // 收集所有上傳的文件
-    const uploadedFiles: any[] = [];
-    if (uploadedFilesObj.verficationDocument) {
-      const files = Array.isArray(uploadedFilesObj.verficationDocument)
-        ? uploadedFilesObj.verficationDocument
-        : [uploadedFilesObj.verficationDocument];
-      uploadedFiles.push(...files);
-    }
-    if (uploadedFilesObj.identificationDocument) {
-      const files = Array.isArray(uploadedFilesObj.identificationDocument)
-        ? uploadedFilesObj.identificationDocument
-        : [uploadedFilesObj.identificationDocument];
-      uploadedFiles.push(...files);
+    if (body.identificationType !== "businessNo" && body.identificationType !== "personalId") {
+      return c.text("Invalid identification type", 400);
     }
 
-    if (uploadedFiles.length === 0) {
-      return c.text("沒有上傳文件", 400);
+    if (typeof body.identificationNumber !== "string" || body.identificationNumber.length === 0) {
+      return c.text("Invalid identification number", 400);
     }
 
-    // 只處理雇主的身份證明文件更新
-    if (user.role !== Role.EMPLOYER) {
-      return c.text("只有雇主可以更新身份證明文件", 403);
-    }
+    if (user.role === Role.EMPLOYER) {
+      const uploadDBFiles = files.map((file: {filename: string; name: string; type: string }) => ({
+        originalName: file.name as string,
+        type: file.type as string,
+        r2Name: file.filename as string
+      }));
 
-    // 處理上傳的文件
-    const documentUrls = [];
-
-    // 上傳文件到 S3
-    try {
       await Promise.all(
-        uploadedFiles.map(async (file) => {
+        files.map(async (file: { path: string; filename: string; }) => {
           const currentFile = Bun.file(file.path);
-
-          // 檢查檔案是否存在
-          if (!(await currentFile.exists())) {
-            throw new Error(`檔案不存在: ${file.path}`);
-          }
-
           await s3Client.write(`identification/${user.userId}/${file.filename}`, currentFile);
-          console.log(`身份證明文件 ${file.name} 上傳成功`);
-        }),
-      );
-    } catch (uploadError) {
-      console.error("上傳身份證明文件時出錯:", uploadError);
-      FileManager.cleanupTempFiles(uploadedFiles);
-      return c.text("文件上傳失敗", 500);
-    }
+        })
+      ); 
 
-    // 建立文件資訊
-    for (const file of uploadedFiles) {
-      // 驗證檔案物件的完整性
-      if (!file || !file.filename || !file.name) {
-        console.error('❌ 驗證文件檔案物件不完整:', file);
-        FileManager.cleanupTempFiles(uploadedFiles);
-        return c.text("文件資料不完整", 400);
+      if(user.verificationDocuments && user.verificationDocuments.length > 0) {
+        await Promise.all(
+          user.verificationDocuments.map(async (doc: { r2Name: string }) => {
+            await s3Client.delete(`identification/${user.userId}/${doc.r2Name}`);
+          })
+        );
       }
 
-      const docData = {
-        originalName: file.name,
-        r2Name: file.filename, // 使用 r2Name 保持一致性
-        type: file.type,
-        size: file.size,
-      };
+      await dbClient
+        .update(employers)
+        .set({
+          identificationType: body.identificationType,
+          identificationNumber: body.identificationNumber,
+          verificationDocuments: uploadDBFiles,
+          updatedAt: new Date(),
+        })
+        .where(eq(employers.employerId, user.employerId));
 
-      // 驗證 docData 不包含 URL
-      if (docData.r2Name && (docData.r2Name.includes('http') || docData.r2Name.includes('presigned'))) {
-        console.error('❌ 檢測到嘗試儲存 URL 到驗證文件資料庫:', docData);
-        FileManager.cleanupTempFiles(uploadedFiles);
-        return c.text("文件資料格式錯誤", 400);
-      }
-
-      console.log('✅ 驗證文件資料:', docData);
-      documentUrls.push(docData);
+      return c.text("verification documents updated successfully", 200);
     }
 
-    // 更新雇主的身份證明文件
-    await dbClient
-      .update(employers)
-      .set({
-        verificationDocuments: documentUrls,
-        updatedAt: new Date(),
-      })
-      .where(eq(employers.employerId, user.userId));
-
+    return c.text("Only employers can update identification documents", 403);
+  } finally {
     // 清理臨時文件
-    FileManager.cleanupTempFiles(uploadedFiles);
-
-    return c.json({
-      message: "身份證明文件更新成功",
-      documents: documentUrls,
-    });
-  } catch (error) {
-    console.error("更新身份證明文件時出錯:", error);
-    return c.text("伺服器內部錯誤", 500);
+    if (files.length > 0) FileManager.cleanupTempFiles(files);
+    await UserCache.clearUserProfile(user.employerId, Role.EMPLOYER);
+    
   }
 });
 
 // Update Profile Photo
 router.put("/update/profilePhoto", authenticated, uploadProfilePhoto, async (c) => {
+  
+  const user = c.get("user");
+  const uploadedFilesObj = c.get("uploadedFiles") as Record<string, any>;
+  const body = await c.req.parseBody();
+  
+  const photoFile = uploadedFilesObj.profilePhoto;
+  const photoData = {
+    originalName: photoFile.name,
+    type: photoFile.type,
+    r2Name: photoFile.filename,
+  };
+
   try {
-    const user = c.get("user");
-    const uploadedFilesObj = c.get("uploadedFiles") as Record<string, any>;
-
-    if (!uploadedFilesObj || !uploadedFilesObj.profilePhoto) {
-      return c.text("沒有上傳照片", 400);
+    if (photoFile.length == 0 && body.deleteProfilePhoto == "true") {
+      if (user.employerPhoto == null) return c.text("No profile photo to delete", 200);
+      await s3Client.delete(`profile-photos/${user.role}s/${user.employerPhoto.r2Name}`);
+      await dbClient
+        .update(employers)
+        .set({
+          employerPhoto: null,
+          updatedAt: new Date(),
+        })
+        .where(eq(employers.employerId, user.employerId));
+      return c.text("個人照片已刪除", 200);
     }
 
-    const photoFile = uploadedFilesObj.profilePhoto; // profilePhoto 是單個檔案
+    const currentFile = Bun.file(photoFile.path);
 
-    // 驗證檔案物件的完整性
-    if (!photoFile || !photoFile.filename || !photoFile.name || !photoFile.path) {
-      console.error('❌ 個人照片檔案物件不完整:', photoFile);
-      return c.text("檔案資料不完整", 400);
-    }
-
-    console.log('✅ 個人照片檔案資料:', {
-      name: photoFile.name,
-      filename: photoFile.filename,
-      type: photoFile.type,
-      size: photoFile.size
-    });
-
-    // 上傳照片到 S3
-    try {
-      const currentFile = Bun.file(photoFile.path);
-
-      // 檢查檔案是否存在
-      if (!(await currentFile.exists())) {
-        throw new Error(`檔案不存在: ${photoFile.path}`);
-      }
-
-      // 根據用戶角色決定上傳路徑
-      const uploadPath = user.role === Role.WORKER
-        ? `profile-photos/workers/${photoFile.filename}`
-        : `profile-photos/employers/${photoFile.filename}`;
-
-      await s3Client.write(uploadPath, currentFile);
-      console.log(`個人照片 ${photoFile.name} 上傳成功`);
-    } catch (uploadError) {
-      console.error("上傳個人照片時出錯:", uploadError);
-      FileManager.cleanupTempFiles([photoFile]);
-      return c.text("照片上傳失敗", 500);
-    }
-
-    const photoData = {
-      originalName: photoFile.name,
-      type: photoFile.type,
-      r2Name: photoFile.filename, // 使用 r2Name 而不是 filename
-    };
-
-    // 驗證 photoData 不包含 URL
-    if (photoData.r2Name && (photoData.r2Name.includes('http') || photoData.r2Name.includes('presigned'))) {
-      console.error('❌ 檢測到嘗試儲存 URL 到資料庫:', photoData);
-      return c.text("檔案資料格式錯誤", 400);
-    }
-
-    // 根據用戶角色更新對應的照片
-    if (user.role === Role.WORKER) {
+    if (user.role == Role.WORKER) {
+      await s3Client.delete(`profile-photos/workers/${user.profilePhoto.r2Name}`);
+      await s3Client.write(`profile-photos/workers/${photoFile.filename}`, currentFile);
       await dbClient
         .update(workers)
         .set({
-          profilePhoto: photoData,
+          profilePhoto: {
+            originalName: photoData.originalName,
+            type: photoData.type,
+            r2Name: photoData.r2Name,
+          },
           updatedAt: new Date(),
         })
         .where(eq(workers.workerId, user.userId));
-    } else if (user.role === Role.EMPLOYER) {
+      return c.text("worker profile photo updated successfully", 200);
+
+    } else if (user.role == Role.EMPLOYER) {
+      if (user.employerPhoto != null){await s3Client.delete(`profile-photos/employers/${user.employerPhoto.r2Name}`);}
+      await s3Client.write(`profile-photos/employers/${photoFile.filename}`, currentFile);
+      
       await dbClient
         .update(employers)
         .set({
           employerPhoto: photoData,
           updatedAt: new Date(),
         })
-        .where(eq(employers.employerId, user.userId));
-    } else {
-      return c.text("無效的用戶角色", 400);
+        .where(eq(employers.employerId, user.employerId));
+      
+      return c.text("employer profile photo updated successfully", 200);
     }
-
-    // 清理臨時文件
-    FileManager.cleanupTempFiles([photoFile]);
-
-    return c.json({
-      message: "個人照片更新成功",
-      photo: photoData,
-    });
+    return c.text("invalid role", 400);
   } catch (error) {
     console.error("更新個人照片時出錯:", error);
     return c.text("伺服器內部錯誤", 500);
-  }
-});
-
-// Get Employer Verification Documents
-router.get("/employer/verification-documents", authenticated, requireEmployer, async (c) => {
-  try {
-    const user = c.get("user");
-    const employer = await dbClient.query.employers.findFirst({
-      where: eq(employers.employerId, user.userId),
-      columns: {
-        password: false, // 排除密碼
-      },
-    });
-
-    if (!employer) {
-      return c.text("雇主不存在", 404);
-    }
-
-    // 獲取驗證文件的預簽名 URL
-    let documentsWithUrls = [];
-
-    if (employer.verificationDocuments && Array.isArray(employer.verificationDocuments)) {
-      console.log(`正在為 employer ${user.userId} 處理 ${employer.verificationDocuments.length} 個驗證文件`);
-      documentsWithUrls = await Promise.all(
-        employer.verificationDocuments.map(async (doc: any, index: number) => {
-          if (!doc || !doc.r2Name) {
-            console.warn(`驗證文件 ${index} 缺少 r2Name 屬性:`, doc);
-            return {
-              ...doc,
-              presignedUrl: null,
-              error: "文件資料不完整"
-            };
-          }
-
-          const presignedUrl = await FileManager.getPresignedUrl(`identification/${user.userId}/${doc.r2Name}`);
-
-          if (presignedUrl) {
-            return { ...doc, presignedUrl };
-          } else {
-            console.warn(`❌ 驗證文件 URL 生成失敗: ${doc.r2Name}`);
-            return {
-              ...doc,
-              presignedUrl: null,
-              error: "URL 生成失敗"
-            };
-          }
-        })
-      );
-    } else {
-      console.log(`Employer ${user.userId} 沒有驗證文件或格式不正確`);
-    }
-
-    return c.json({
-      employerId: employer.employerId,
-      employerName: employer.employerName,
-      branchName: employer.branchName,
-      industryType: employer.industryType,
-      approvalStatus: employer.approvalStatus,
-      identificationType: employer.identificationType,
-      identificationNumber: employer.identificationNumber,
-      verificationDocuments: documentsWithUrls,
-      employerPhoto: employer.employerPhoto,
-    });
-  } catch (error) {
-    console.error("獲取雇主驗證文件時出錯:", error);
-    return c.text("伺服器內部錯誤", 500);
+  } finally {
+    if (photoFile.length > 0) FileManager.cleanupTempFiles([photoFile]);
+    await UserCache.clearUserProfile(user.employerId, Role.EMPLOYER);
   }
 });
 

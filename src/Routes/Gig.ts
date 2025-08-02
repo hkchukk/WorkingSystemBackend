@@ -18,7 +18,7 @@ const router = new Hono<HonoGenericContext>();
 // 統一的照片上傳處理函數
 async function handlePhotoUpload(reqFile: any, existingPhotos: any[] = []) {
   // 如果沒有上傳檔案，返回現有照片
-  if (!reqFile?.environmentPhotos) {
+  if (!reqFile?.environmentPhotos || reqFile.environmentPhotos.length === 0) {
     return {
       environmentPhotosInfo: existingPhotos,
       uploadedFiles: [],
@@ -686,6 +686,7 @@ router.put(
       // 檢查是否有申請中或已核准的申請
       const activeApplications = await dbClient.query.gigApplications.findFirst({
         where: and(eq(gigApplications.gigId, gigId), or(eq(gigApplications.status, "pending"), eq(gigApplications.status, "approved"))),
+        columns: { applicationId: true },
       });
 
       if (activeApplications) {
@@ -694,7 +695,6 @@ router.put(
 
       // 使用原始的照片資料，而不是格式化後的資料
       const existingPhotos = Array.isArray(existingGig.environmentPhotos) ? existingGig.environmentPhotos : [];
-      console.log('現有照片資料:', existingPhotos.map(p => ({ filename: p?.filename, originalName: p?.originalName })));
       const { environmentPhotosInfo, uploadedFiles: filesList, addedCount, totalCount, message } = await handlePhotoUpload(reqFile, existingPhotos);
       uploadedFiles = filesList;
 

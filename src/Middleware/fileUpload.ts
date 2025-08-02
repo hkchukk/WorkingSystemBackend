@@ -32,19 +32,18 @@ export function createFileUploadMiddleware(configs: FileUploadConfig[]) {
       const uploadedFiles: Record<string, UploadedFile | UploadedFile[]> = {};
 
       for (const config of configs) {
+        // 處理單個或多個文件，並過濾出有效文件
         const files = body[config.name];
+        const allFiles = Array.isArray(files) ? files : (files ? [files] : []);
+        const fileArray = allFiles.filter(file => file instanceof File && file.name);
 
-        if (!files) {
+        if (!files || fileArray.length === 0) {
           uploadedFiles[config.name] = [];
           continue;
         }
 
-        // 處理單個或多個文件
-        const fileArray = Array.isArray(files) ? files : [files];
-
         // 確定實際使用的欄位名稱
         const actualFieldName = body[config.name] ? config.name : config.name + '[]';
-
         console.log(`📁 處理 ${config.name} 檔案上傳 (實際欄位: ${actualFieldName}): 收到 ${fileArray.length} 個檔案，限制 ${config.maxCount} 個`);
 
         // 驗證文件數量
@@ -169,5 +168,3 @@ export const uploadEnvironmentPhotos = createFileUploadMiddleware([
     dest: "src/uploads/environmentPhotos"
   }
 ]);
-
-export { FileManager } from "../Client/Cache/FileCache";

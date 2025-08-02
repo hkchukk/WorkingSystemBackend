@@ -302,6 +302,8 @@ router.get("/worker/calendar", authenticated, requireWorker, async (c) => {
       }
     }
 
+    whereConditions.push(eq(gigs.isActive, true));
+
     // 執行資料庫查詢
     const results = await dbClient
       .select({

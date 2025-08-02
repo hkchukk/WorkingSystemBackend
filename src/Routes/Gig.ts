@@ -671,7 +671,7 @@ router.put(
 
       // 處理照片上傳（如果有新照片上傳）
       const existingGig = await dbClient.query.gigs.findFirst({
-        where: and(eq(gigs.gigId, gigId), eq(gigs.employerId, user.employerId)),
+        where: and(eq(gigs.gigId, gigId), eq(gigs.employerId, user.employerId), eq(gigs.isActive, true)),
       });
 
       if (!existingGig) {
@@ -822,7 +822,7 @@ router.patch("/:gigId/toggle-listing", authenticated, requireEmployer, requireAp
     const gigId = c.req.param("gigId");
 
     const existingGig = await dbClient.query.gigs.findFirst({
-      where: and(eq(gigs.gigId, gigId), eq(gigs.employerId, user.employerId)),
+      where: and(eq(gigs.gigId, gigId), eq(gigs.employerId, user.employerId), eq(gigs.isActive, true)),
     });
 
     if (!existingGig) {
@@ -837,11 +837,6 @@ router.patch("/:gigId/toggle-listing", authenticated, requireEmployer, requireAp
       // 檢查工作是否已過期
       if (existingGig.dateEnd && existingGig.dateEnd < today) {
         return c.text("工作已過期，無法重新上架", 400);
-      }
-
-      // 檢查工作是否被停用
-      if (!existingGig.isActive) {
-        return c.text("工作已停用，請先啟用工作", 400);
       }
     }
 

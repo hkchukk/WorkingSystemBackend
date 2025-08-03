@@ -10,7 +10,6 @@ import { zValidator } from "@hono/zod-validator";
 import { adminRegisterSchema } from "../Types/zodSchema";
 import { hash } from "@node-rs/argon2";
 import { argon2Config } from "../config";
-import { emailClient } from "../Client/EmailClient";
 import NotificationHelper from "../Utils/NotificationHelper";
 import { UserCache } from "../Client/Cache/Index";
 import { Role } from "../Types/types";
@@ -60,14 +59,6 @@ router.patch(
 			employerFound.employerId,
 			employerFound.employerName
 		);
-
-		// Fill in email details
-		await emailClient.sendMail({
-			from: "",
-			to: employerFound.email,
-			subject: "",
-			text: ""
-		})
 
 		await UserCache.clearUserProfile(employerFound.employerId, Role.EMPLOYER);
 		return c.json(updatedEmployer[0]);

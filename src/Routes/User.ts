@@ -22,6 +22,7 @@ import { UserCache, FileManager, RatingCache, s3Client } from "../Client/Cache/I
 import NotificationHelper from "../Utils/NotificationHelper";
 import { requireEmployer } from "../Middleware/guards";
 import { promise } from "zod";
+import { sendEmail } from "../Client/EmailClient";
 
 const router = new Hono<HonoGenericContext>();
 
@@ -76,8 +77,13 @@ router.post("/register/worker", zValidator("form", workerSignupSchema), async (c
 
   const newUser = insertedUsers[0];
 
-  // 發送歡迎通知給新註冊的打工者
+  // 發送歡迎[通知]給新註冊的打工者
   await NotificationHelper.notifyUserWelcome(newUser.workerId, newUser.firstName, "worker");
+
+  // 發送歡迎[郵件]給新註冊的打工者
+  const subject = "你好! 歡迎加入 KK";
+  const html = "<h1>Welcome</h1><p>加入 KK，開始你的打工之旅</p>";
+  await sendEmail(email, subject, html);
 
   return c.json(
     {
@@ -163,8 +169,13 @@ router.post("/register/employer", uploadDocument, zValidator("form", employerSig
 
       const newUser = insertedUsers[0];
 
-      // 發送歡迎通知給新註冊的商家
+      // 發送歡迎[通知]給新註冊的商家
       await NotificationHelper.notifyUserWelcome(newUser.employerId, newUser.employerName, "employer");
+
+      // 發送歡迎[郵件]給新註冊的商家
+      const subject = "你好! 歡迎加入 KK！";
+      const html = "<h1>Welcome</h1><p>加入 KK，開始您的找人之旅</p>";
+      await sendEmail(email, subject, html);
 
       return c.json(
         {

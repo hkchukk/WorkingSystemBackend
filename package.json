@@ -11,6 +11,7 @@
     "drizzle-kit": "^0.31.4",
     "drizzle-orm": "0.44.3",
     "form-data": "^4.0.4",
+    "google-auth-library": "^10.2.0",
     "hono": "^4.8.10",
     "hono-sessions": "^0.8.0",
     "ioredis": "^5.7.0",

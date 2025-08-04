@@ -355,6 +355,7 @@ router.get("/my-ratings/employer", authenticated, requireEmployer, requireApprov
           columns: {
             gigId: true,
             title: true,
+            dateStart: true,
             dateEnd: true,
           },
         },
@@ -378,6 +379,7 @@ router.get("/my-ratings/employer", authenticated, requireEmployer, requireApprov
           gig: {
             gigId: rating.gig.gigId,
             title: rating.gig.title,
+            startDate: rating.gig.dateStart,
             endDate: rating.gig.dateEnd,
           },
           ratingValue: rating.ratingValue,
@@ -434,6 +436,7 @@ router.get("/my-ratings/worker", authenticated, requireWorker, async (c) => {
           columns: {
             gigId: true,
             title: true,
+            dateStart: true,
             dateEnd: true,
           },
         },
@@ -457,6 +460,7 @@ router.get("/my-ratings/worker", authenticated, requireWorker, async (c) => {
           gig: {
             gigId: rating.gig.gigId,
             title: rating.gig.title,
+            startDate: rating.gig.dateStart,
             endDate: rating.gig.dateEnd,
           },
           ratingValue: rating.ratingValue,
@@ -515,6 +519,7 @@ router.get("/received-ratings/employer", authenticated, requireEmployer, async (
           columns: {
             gigId: true,
             title: true,
+            dateStart: true,
             dateEnd: true,
           },
         },
@@ -538,6 +543,7 @@ router.get("/received-ratings/employer", authenticated, requireEmployer, async (
           gig: {
             gigId: rating.gig.gigId,
             title: rating.gig.title,
+            startDate: rating.gig.dateStart,
             endDate: rating.gig.dateEnd,
           },
           ratingValue: rating.ratingValue,
@@ -594,6 +600,7 @@ router.get("/received-ratings/worker", authenticated, requireWorker, async (c) =
           columns: {
             gigId: true,
             title: true,
+            dateStart: true,
             dateEnd: true,
           },
         },
@@ -617,6 +624,7 @@ router.get("/received-ratings/worker", authenticated, requireWorker, async (c) =
           gig: {
             gigId: rating.gig.gigId,
             title: rating.gig.title,
+            startDate: rating.gig.dateStart,
             endDate: rating.gig.dateEnd,
           },
           ratingValue: rating.ratingValue,
@@ -642,75 +650,112 @@ router.get("/received-ratings/worker", authenticated, requireWorker, async (c) =
 // ========== 可評分列表 ==========
 
 /**
- * 商家獲取可以評分的工作列表
- * GET /rating/list/employer
+ * 商家對某個工作獲取可以評分的人
+ * GET /rating/list/employer/gig/:gigId?status=rated|unrated|all
  */
-router.get("/list/employer", authenticated, requireEmployer, requireApprovedEmployer, async (c) => {
+router.get("/list/employer/gig/:gigId", authenticated, requireEmployer, requireApprovedEmployer, async (c) => {
   try {
     const user = c.get("user");
+    const gigId = c.req.param("gigId");
     const limit = c.req.query("limit") || "10";
     const offset = c.req.query("offset") || "0";
+    const status = c.req.query("status") || "unrated"; // 預設顯示未評分
     const requestLimit = Number.parseInt(limit);
     const requestOffset = Number.parseInt(offset);
     const employerId = user.employerId;
     const currentDate = moment().format("YYYY-MM-DD");
 
-    // 查詢該商家可評分的工作
-    const ratableGigs = await dbClient
+    // 驗證篩選參數
+    if (!["rated", "unrated", "all"].includes(status)) {
+      return c.json({
+        message: "無效的篩選參數，請使用 rated、unrated 或 all",
+      }, 400);
+    }
+
+    // 首先驗證工作是否存在且屬於該商家，並且已結束
+    const gig = await dbClient.query.gigs.findFirst({
+      where: and(
+        eq(gigs.gigId, gigId),
+        eq(gigs.employerId, employerId),
+        lt(gigs.dateEnd, currentDate) // 工作必須已結束
+      ),
+      columns: {
+        gigId: true,
+      },
+    });
+
+    if (!gig) {
+      return c.json({
+        message: "找不到指定的工作、無權限查看，或工作尚未結束",
+      }, 404);
+    }
+
+    // 建立查詢條件
+    const whereConditions = [
+      eq(gigApplications.gigId, gigId),
+      eq(gigApplications.status, "approved"), // 必須是已批准的申請
+    ];
+
+    // 根據篩選條件添加評分狀態篩選
+    if (status === "rated") {
+      whereConditions.push(sql`${workerRatings.ratingId} IS NOT NULL`); // 已評分
+    } else if (status === "unrated") {
+      whereConditions.push(sql`${workerRatings.ratingId} IS NULL`); // 未評分
+    }
+
+    // 查詢該工作中的打工者
+    const workerList = await dbClient
       .select({
-        gigId: gigs.gigId,
-        title: gigs.title,
-        dateEnd: gigs.dateEnd,
         workerId: gigApplications.workerId,
         workerFirstName: workers.firstName,
         workerLastName: workers.lastName,
+        appliedAt: gigApplications.createdAt,
+        ratingId: workerRatings.ratingId,
+        ratingValue: workerRatings.ratingValue,
+        ratingComment: workerRatings.comment,
+        ratedAt: workerRatings.createdAt,
       })
-      .from(gigs)
-      .innerJoin(gigApplications, and(
-        eq(gigs.gigId, gigApplications.gigId),
-        eq(gigApplications.status, "approved")
-      ))
+      .from(gigApplications)
       .innerJoin(workers, eq(gigApplications.workerId, workers.workerId))
       .leftJoin(workerRatings, and(
-        eq(gigs.gigId, workerRatings.gigId),
+        eq(workerRatings.gigId, gigId),
         eq(gigApplications.workerId, workerRatings.workerId),
         eq(workerRatings.employerId, employerId)
       ))
-      .where(and(
-        eq(gigs.employerId, employerId),
-        lt(gigs.dateEnd, currentDate), // 工作必須已結束
-        sql`${workerRatings.ratingId} IS NULL` // 該商家未評分
-      ))
-      .orderBy(desc(gigs.dateEnd))
+      .where(and(...whereConditions))
+      .orderBy(gigApplications.createdAt)
       .limit(requestLimit + 1) // 多查一筆來確認是否有更多資料
       .offset(requestOffset);
 
-    const hasMore = ratableGigs.length > requestLimit;
-    const returnGigs = hasMore ? ratableGigs.slice(0, requestLimit) : ratableGigs;
+    const hasMore = workerList.length > requestLimit;
+    const returnWorkers = hasMore ? workerList.slice(0, requestLimit) : workerList;
 
     return c.json({
       data: {
-        ratableGigs: returnGigs.map((gig) => ({
-          gigId: gig.gigId,
-          title: gig.title,
-          endDate: gig.dateEnd,
-          worker: {
-            workerId: gig.workerId,
-            name: `${gig.workerFirstName} ${gig.workerLastName}`,
-          },
+        workers: returnWorkers.map((worker) => ({
+          workerId: worker.workerId,
+          name: `${worker.workerFirstName} ${worker.workerLastName}`,
+          appliedAt: worker.appliedAt,
+          isRated: worker.ratingId !== null,
+          rating: worker.ratingId ? {
+            ratingId: worker.ratingId,
+            ratingValue: worker.ratingValue,
+            comment: worker.ratingComment,
+            ratedAt: worker.ratedAt,
+          } : null,
         })),
         pagination: {
           limit: requestLimit,
           offset: requestOffset,
           hasMore,
-          returned: returnGigs.length,
+          returned: returnWorkers.length,
         },
       },
     }, 200);
   } catch (error) {
-    console.error("獲取可評分工作時發生錯誤:", error);
+    console.error("獲取打工者列表時發生錯誤:", error);
     return c.json({
-      message: "獲取可評分工作失敗，請稍後再試",
+      message: "獲取打工者列表失敗，請稍後再試",
     }, 500);
   }
 });
@@ -734,6 +779,7 @@ router.get("/list/worker", authenticated, requireWorker, async (c) => {
       .select({
         gigId: gigs.gigId,
         title: gigs.title,
+        dateStart: gigs.dateStart,
         dateEnd: gigs.dateEnd,
         employerId: employers.employerId,
         employerName: employers.employerName,
@@ -765,6 +811,7 @@ router.get("/list/worker", authenticated, requireWorker, async (c) => {
         ratableGigs: returnGigs.map((gig) => ({
           gigId: gig.gigId,
           title: gig.title,
+          startDate: gig.dateStart,
           endDate: gig.dateEnd,
           employer: {
             employerId: gig.employerId,

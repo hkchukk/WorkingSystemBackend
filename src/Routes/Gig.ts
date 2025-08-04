@@ -491,19 +491,19 @@ router.get("/my-gigs", authenticated, requireEmployer, async (c) => {
     const currentDate = moment().format("YYYY-MM-DD");
 
     // 建立基本查詢條件
-    const whereConditions = [eq(gigs.employerId, user.employerId), eq(gigs.isActive, true)];
+    const whereConditions = [eq(gigs.employerId, user.employerId)];
 
     // 根據狀態參數添加日期條件
     if (status && ["not_started", "ongoing", "completed"].includes(status)) {
       if (status === "not_started") {
         // 未開始：dateStart > currentDate
-        whereConditions.push(gt(gigs.dateStart, currentDate));
+        whereConditions.push(gt(gigs.dateStart, currentDate), eq(gigs.isActive, true));
       } else if (status === "completed") {
         // 已結束：dateEnd < currentDate
         whereConditions.push(lt(gigs.dateEnd, currentDate));
       } else if (status === "ongoing") {
         // 進行中：dateStart <= currentDate AND dateEnd >= currentDate
-        whereConditions.push(and(lte(gigs.dateStart, currentDate), gte(gigs.dateEnd, currentDate)));
+        whereConditions.push(and(lte(gigs.dateStart, currentDate), gte(gigs.dateEnd, currentDate)), eq(gigs.isActive, true));
       }
     }
 
@@ -534,6 +534,10 @@ router.get("/my-gigs", authenticated, requireEmployer, async (c) => {
     const gigsWithPhotos = await Promise.all(
       returnGigs.map(async (gig) => ({
         ...gig,
+        dateStart: gig.dateStart ? moment(gig.dateStart).format("YYYY-MM-DD") : null,
+        dateEnd: gig.dateEnd ? moment(gig.dateEnd).format("YYYY-MM-DD") : null,
+        publishedAt: gig.publishedAt ? moment(gig.publishedAt).format("YYYY-MM-DD") : null,
+        unlistedAt: gig.unlistedAt ? moment(gig.unlistedAt).format("YYYY-MM-DD") : null,
         environmentPhotos: await formatEnvironmentPhotos(gig.environmentPhotos, 1),
       }))
     );
@@ -765,7 +769,13 @@ router.patch("/:gigId/toggle-status", authenticated, requireEmployer, requireApp
     });
 
     if (!gigWithApplications) {
-      return c.text("工作不存在或無權限修改", 404);
+      return c.json(
+        {
+          message: "工作不存在或無權限修改",
+          success: false,
+        },
+        404
+      );
     }
 
     // 如果工作已經停用，不允許操作
@@ -773,6 +783,7 @@ router.patch("/:gigId/toggle-status", authenticated, requireEmployer, requireApp
       return c.json(
         {
           message: "工作已經停用，無法再次操作",
+          success: false,
         },
         400
       );
@@ -794,18 +805,19 @@ router.patch("/:gigId/toggle-status", authenticated, requireEmployer, requireApp
       return c.json(
         {
           message: "工作已停用",
-          action: "disabled",
+          success: true,
         },
         200
       );
     }
+    
     // 沒有已核准的申請者，直接刪除工作
     await dbClient.delete(gigs).where(eq(gigs.gigId, gigId));
 
     return c.json(
       {
         message: "工作已刪除",
-        action: "deleted",
+        success: true,
       },
       200
     );

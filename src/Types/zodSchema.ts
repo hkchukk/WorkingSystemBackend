@@ -378,11 +378,14 @@ export const adminRegisterSchema = z.object({
 });
 
 /* notification route schemas */
+const notificationTypeEnum = z.enum(["application", "rating", "account", "system"]);
+
 export const createNotificationSchema = z.object({
   receiverId: z.string().min(1, "接收者ID不能為空"),
   title: z.string().min(1, "標題不能為空").max(256, "標題過長"),
   message: z.string().min(1, "訊息不能為空"),
-  type: z.string().min(1, "通知類型不能為空"),
+  type: notificationTypeEnum,
+  resourceId: z.string().min(1).optional(),
 });
 
 export const markAsReadSchema = z.object({
@@ -393,7 +396,8 @@ export const createBatchNotificationSchema = z.object({
   receiverIds: z.array(z.string()).min(1, "至少需要一個接收者ID"),
   title: z.string().min(1, "標題不能為空").max(256, "標題過長"),
   message: z.string().min(1, "訊息不能為空"),
-  type: z.string().min(1, "通知類型不能為空"),
+  type: notificationTypeEnum,
+  resourceId: z.string().min(1).optional(),
 });
 
 export const createGroupNotificationSchema = z.object({
@@ -406,5 +410,6 @@ export const createGroupNotificationSchema = z.object({
   }),
   title: z.string().min(1, "標題不能為空").max(256, "標題過長"),
   message: z.string().min(1, "訊息不能為空"),
-  type: z.string().min(1, "通知類型不能為空"),
+  type: notificationTypeEnum,
+  resourceId: z.string().min(1).optional(),
 });

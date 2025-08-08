@@ -447,9 +447,6 @@ router.post(
 
       const newGig = insertedGig[0];
 
-      // 發送工作發佈成功通知
-      await NotificationHelper.notifyGigPublished(user.employerId, newGig.title);
-
       return c.json(
         {
           message: "工作發佈成功",

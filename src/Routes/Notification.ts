@@ -7,7 +7,7 @@ import { eq, and, desc, inArray } from "drizzle-orm";
 import { notifications } from "../Schema/DatabaseSchema";
 import { zValidator } from "@hono/zod-validator";
 import { createNotificationSchema, markAsReadSchema, createBatchNotificationSchema, createGroupNotificationSchema } from "../Types/zodSchema";
-import NotificationHelper, { type NotificationType } from "../Utils/NotificationHelper";
+import NotificationHelper from "../Utils/NotificationHelper";
 
 const router = new Hono<HonoGenericContext>();
 
@@ -38,9 +38,11 @@ router.get("/list", authenticated, async (c) => {
       columns: {
         notificationId: true,
         title: true,
+        message: true,
         type: true,
         isRead: true,
         createdAt: true,
+        resourceId: true,
       },
       limit: requestLimit + 1, // 多查一筆來確認是否有更多資料
       offset: requestOffset,
@@ -48,16 +50,16 @@ router.get("/list", authenticated, async (c) => {
 
     // 檢查是否有更多資料
     const hasMore = notificationList.length > requestLimit;
-    const returnNotifications = hasMore ? notificationList.slice(0, requestLimit) : notificationList;
+    const sliced = hasMore ? notificationList.slice(0, requestLimit) : notificationList;
 
     return c.json({
       data: {
-        notifications: returnNotifications,
+        notifications: sliced,
         pagination: {
           limit: requestLimit,
           offset: requestOffset,
           hasMore,
-          returned: returnNotifications.length,
+          returned: sliced.length,
         },
       },
     }, 200);
@@ -103,14 +105,16 @@ router.put("/mark-as-read", authenticated, zValidator("json", markAsReadSchema),
     const user = c.get("user");
   try {
     const { notificationIds } = c.req.valid("json");
+    const isReadParam = c.req.query("isRead");
+    const isRead = isReadParam === undefined ? true : isReadParam === "true";
 
     // 驗證通知是否屬於當前用戶並批量更新
     const currentDate = new Date();
     const result = await dbClient
       .update(notifications)
       .set({
-        isRead: true,
-        readAt: currentDate,
+        isRead: isRead,
+        readAt: isRead ? currentDate : null,
         updatedAt: currentDate,
       })
       .where(and(
@@ -126,7 +130,7 @@ router.put("/mark-as-read", authenticated, zValidator("json", markAsReadSchema),
     }
 
     return c.json({
-      message: `成功標記 ${result.length} 條通知為已讀`,
+      message: `成功標記 ${result.length} 條通知為${isRead ? "已讀" : "未讀"}`,
       data: {
         updatedCount: result.length,
       },
@@ -151,6 +155,7 @@ router.post("/create", authenticated, zValidator("json", createNotificationSchem
         title: body.title,
         message: body.message,
         type: body.type,
+        resourceId: body.resourceId || null,
       })
       .returning();
 
@@ -170,9 +175,9 @@ router.post("/create", authenticated, zValidator("json", createNotificationSchem
 // 批量建立通知 (管理員或系統內部使用)
 router.post("/create-batch", authenticated, zValidator("json", createBatchNotificationSchema), async (c) => {
   try {
-    const { receiverIds, title, message, type } = c.req.valid("json");
+    const { receiverIds, title, message, type, resourceId } = c.req.valid("json");
 
-    const success = await NotificationHelper.createBatch(receiverIds, { title, message, type: type as NotificationType });
+    const success = await NotificationHelper.createBatch(receiverIds, { title, message, type, resourceId });
 
     if (success) {
       return c.json({
@@ -197,9 +202,9 @@ router.post("/create-batch", authenticated, zValidator("json", createBatchNotifi
 // 發送通知給指定用戶群組 (管理員或系統內部使用)
 router.post("/create-group", authenticated, zValidator("json", createGroupNotificationSchema), async (c) => {
   try {
-    const { groups, title, message, type } = c.req.valid("json");
+    const { groups, title, message, type, resourceId } = c.req.valid("json");
 
-    const success = await NotificationHelper.notifyUserGroups(groups, title, message, type as NotificationType);
+    const success = await NotificationHelper.notifyUserGroups(groups, title, message, type, resourceId);
 
     if (success) {
       return c.json({
@@ -249,54 +254,6 @@ router.delete("/:notificationId", authenticated, async (c) => {
     console.error("刪除通知失敗:", error);
     return c.json({
       message: "刪除通知失敗",
-    }, 500);
-  }
-});
-
-// 獲取特定通知詳情
-router.get("/:notificationId", authenticated, async (c) => {
-    const user = c.get("user");
-  try {
-        const notificationId = c.req.param("notificationId");
-
-    const notification = await dbClient.query.notifications.findFirst({
-      where: and(
-        eq(notifications.notificationId, notificationId),
-        eq(notifications.receiverId, user.workerId || user.employerId || user.adminId)
-      ),
-    });
-
-    if (!notification) {
-      return c.json({
-        message: "找不到該通知",
-      }, 404);
-    }
-
-    // 如果通知未讀，自動標記為已讀
-    if (!notification.isRead) {
-      const currentDate = new Date();
-
-      await dbClient
-        .update(notifications)
-        .set({
-          isRead: true,
-          readAt: currentDate,
-          updatedAt: currentDate,
-        })
-        .where(eq(notifications.notificationId, notificationId));
-
-      notification.isRead = true;
-      notification.readAt = currentDate;
-    }
-
-    return c.json({
-      data: notification,
-    }, 200);
-
-  } catch (error) {
-    console.error("獲取通知詳情失敗:", error);
-    return c.json({
-      message: "獲取通知詳情失敗",
     }, 500);
   }
 });

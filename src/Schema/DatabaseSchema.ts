@@ -263,6 +263,9 @@ export const notifications = pgTable("notifications", {
   // 通知類型
   type: varchar("type", { length: 128 }).notNull(),
 
+  // 關聯資源 ID
+  resourceId: varchar("resource_id", { length: 21 }),
+
   // 通知狀態
   isRead: boolean("is_read").default(false).notNull(),
   readAt: timestamp("read_at"),

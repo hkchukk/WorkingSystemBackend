@@ -2,17 +2,14 @@ import dbClient from "../Client/DrizzleClient.ts";
 import { notifications, workers, employers, admins } from "../Schema/DatabaseSchema.ts";
 
 // 通知類型定義
-export type NotificationType = 
-  | "application_received" | "application_approved" | "application_rejected"
-  | "rating_received" | "gig_published" | "gig_expired"
-  | "account_approved" | "account_rejected" | "user_welcome"
-  | "system_announcement" | "other";
+export type NotificationType = "application" | "rating" | "account" | "system";
 
 interface NotificationParams {
   receiverId: string;
   title: string;
   message: string;
   type: NotificationType;
+  resourceId?: string;
 }
 
 class NotificationHelper {
@@ -58,52 +55,65 @@ class NotificationHelper {
   }
 
   // ========== 具體通知方法 ==========
-  static async notifyApplicationReceived(employerId: string, workerName: string, gigTitle: string) {
+  static async notifyApplicationReceived(
+    employerId: string,
+    workerName: string,
+    gigTitle: string,
+    resourceId: string,
+  ) {
     return this.create({
       receiverId: employerId,
       title: "收到新的工作申請",
       message: `${workerName} 申請了您的工作「${gigTitle}」，請及時處理。`,
-      type: "application_received"
+      type: "application",
+      resourceId,
     });
   }
 
-  static async notifyApplicationApproved(workerId: string, gigTitle: string, employerName: string) {
+  static async notifyApplicationApproved(
+    workerId: string,
+    gigTitle: string,
+    employerName: string,
+    resourceId: string,
+  ) {
     return this.create({
       receiverId: workerId,
       title: "工作申請已通過",
       message: `恭喜！您申請的工作「${gigTitle}」已被 ${employerName} 核准。`,
-      type: "application_approved"
+      type: "application",
+      resourceId,
     });
   }
 
-  static async notifyApplicationRejected(workerId: string, gigTitle: string, employerName: string, reason?: string) {
-    const message = reason 
-      ? `很抱歉，您申請的工作「${gigTitle}」被 ${employerName} 拒絕。原因：${reason}`
-      : `很抱歉，您申請的工作「${gigTitle}」被 ${employerName} 拒絕。`;
-    
+  static async notifyApplicationRejected(
+    workerId: string,
+    gigTitle: string,
+    employerName: string,
+    resourceId: string,
+  ) {
+    const message = `很抱歉，您申請的工作「${gigTitle}」被 ${employerName} 拒絕。`;
+
     return this.create({
       receiverId: workerId,
       title: "工作申請未通過",
       message,
-      type: "application_rejected"
+      type: "application",
+      resourceId,
     });
   }
 
-  static async notifyRatingReceived(receiverId: string, raterName: string, rating: number) {
+  static async notifyRatingReceived(
+    receiverId: string,
+    raterName: string,
+    ratingValue: number,
+    resourceId: string,
+  ) {
     return this.create({
       receiverId,
       title: "收到新評價",
-      message: `${raterName} 給了您 ${rating} 星評價，快去查看吧！`,
-      type: "rating_received"
-    });
-  }
-
-  static async notifyGigPublished(employerId: string, gigTitle: string) {
-    return this.create({
-      receiverId: employerId,
-      title: "工作刊登成功",
-      message: `您的工作「${gigTitle}」已成功刊登，等待打工者申請中。`,
-      type: "gig_published"
+      message: `${raterName} 給了您 ${ratingValue} 星評價，快去查看吧！`,
+      type: "rating",
+      resourceId,
     });
   }
 
@@ -112,20 +122,20 @@ class NotificationHelper {
       receiverId: userId,
       title: "帳戶審核通過",
       message: `恭喜！您的帳戶「${accountName}」已通過審核，現在可以開始使用所有功能。`,
-      type: "account_approved"
+      type: "account",
+      resourceId: userId,
     });
   }
 
-  static async notifyAccountRejected(userId: string, accountName: string, reason?: string) {
-    const message = reason
-      ? `很抱歉，您的帳戶「${accountName}」審核未通過。原因：${reason}`
-      : `很抱歉，您的帳戶「${accountName}」審核未通過，請聯繫客服了解詳情。`;
-    
+  static async notifyAccountRejected(userId: string, accountName: string) {
+    const message = `很抱歉，您的帳戶「${accountName}」審核未通過，請聯繫客服了解詳情。`;
+
     return this.create({
       receiverId: userId,
       title: "帳戶審核未通過",
       message,
-      type: "account_rejected"
+      type: "account",
+      resourceId: userId,
     });
   }
 
@@ -134,12 +144,12 @@ class NotificationHelper {
     const message = userType === "worker"
       ? `${userName}，歡迎您加入我們的打工平台！您現在可以開始瀏覽和申請工作機會。`
       : `${userName}，歡迎您加入我們的平台！您的帳戶正在審核中，審核通過後即可開始發佈工作。`;
-    
+
     return this.create({
       receiverId: userId,
       title,
       message,
-      type: "user_welcome"
+      type: "system",
     });
   }
 
@@ -203,10 +213,11 @@ class NotificationHelper {
     groups: { workers?: boolean; employers?: boolean; admins?: boolean },
     title: string,
     message: string,
-    type: NotificationType
+    type: NotificationType,
+    resourceId?: string,
   ) {
     const targetUsers = await this.getUserGroups(groups);
-    return this.createBatch(targetUsers, { title, message, type });
+    return this.createBatch(targetUsers, { title, message, type, resourceId });
   }
 }
 

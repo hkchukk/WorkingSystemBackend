@@ -83,7 +83,8 @@ router.post(
       await NotificationHelper.notifyApplicationReceived(
         gig.employerId,
         `${user.firstName} ${user.lastName}`,
-        gig.title
+        gig.title,
+        gig.gigId,
       );
 
       return c.json({
@@ -651,14 +652,15 @@ router.put(
         await NotificationHelper.notifyApplicationApproved(
           application.workerId,
           application.gig.title,
-          user.employerName
+          user.employerName,
+          application.gig.gigId,
         );
       } else if (status === "rejected") {
         await NotificationHelper.notifyApplicationRejected(
           application.workerId,
           application.gig.title,
           user.employerName,
-          undefined // 如果有拒絕原因的話
+          application.gig.gigId,
         );
       }
 

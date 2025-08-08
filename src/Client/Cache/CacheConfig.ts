@@ -13,6 +13,7 @@ export const CACHE_PREFIXES = {
 	RATING_LIST: "rating_list:",
 	APPLICATION_LIST: "app_list:",
 	APPLICATION_DETAIL: "app_detail:",
+	MY_GIGS_COUNT: "my_gigs_count:",
 };
 
 // 快取過期時間定義（秒）
@@ -28,4 +29,5 @@ export const CACHE_TTL = {
 	RATING_LIST: 900, // 15 分鐘
 	APPLICATION_LIST: 900, // 15 分鐘
 	APPLICATION_DETAIL: 1800, // 30 分鐘
+	MY_GIGS_COUNT: 1800, // 30 分鐘
 };

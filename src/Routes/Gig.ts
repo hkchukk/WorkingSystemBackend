@@ -4,14 +4,13 @@ import { requireEmployer, requireApprovedEmployer } from "../Middleware/guards";
 import type IRouter from "../Interfaces/IRouter";
 import type { HonoGenericContext } from "../Types/types";
 import dbClient from "../Client/DrizzleClient";
-import { eq, and, desc, sql, gte, lte, or, lt, gt } from "drizzle-orm";
+import { eq, and, desc, sql, gte, lte, or, lt, gt, count } from "drizzle-orm";
 import { gigs, gigApplications } from "../Schema/DatabaseSchema";
 import { zValidator } from "@hono/zod-validator";
 import { createGigSchema, updateGigSchema } from "../Types/zodSchema";
 import { uploadEnvironmentPhotos } from "../Middleware/fileUpload";
 import moment from "moment";
-import NotificationHelper from "../Utils/NotificationHelper";
-import { FileManager, s3Client } from "../Client/Cache/Index";
+import { FileManager, s3Client, GigCache } from "../Client/Cache/Index";
 
 const router = new Hono<HonoGenericContext>();
 
@@ -482,7 +481,7 @@ router.get("/my-gigs", authenticated, requireEmployer, async (c) => {
     const user = c.get("user");
     const limit = c.req.query("limit") || "10";
     const offset = c.req.query("offset") || "0";
-    const status = c.req.query("status");
+    const status = c.req.query("status") || "ongoing";
     const requestLimit = Number.parseInt(limit);
     const requestOffset = Number.parseInt(offset);
     const currentDate = moment().format("YYYY-MM-DD");
@@ -539,6 +538,18 @@ router.get("/my-gigs", authenticated, requireEmployer, async (c) => {
       }))
     );
 
+    let totalCountValue = await GigCache.getMyGigsCount(user.employerId, status);
+    if (totalCountValue == null) {
+      const [row] = await dbClient
+        .select({ total: count() })
+        .from(gigs)
+        .where(and(...whereConditions));
+      totalCountValue = Number(row?.total ?? 0);
+      await GigCache.setMyGigsCount(user.employerId, status, totalCountValue);
+    }
+
+    const totalPage = Math.max(1, Math.ceil(totalCountValue / requestLimit));
+
     return c.json(
       {
         gigs: gigsWithPhotos,
@@ -547,6 +558,8 @@ router.get("/my-gigs", authenticated, requireEmployer, async (c) => {
           offset: requestOffset,
           hasMore,
           returned: gigsWithPhotos.length,
+          totalCount: totalCountValue,
+          totalPage,
         },
       },
       200
@@ -562,88 +575,18 @@ router.get("/:gigId", authenticated, requireEmployer, async (c) => {
   const user = c.get("user");
   try {
     const gigId = c.req.param("gigId");
-    const application = c.req.query("application");
-    const status = c.req.query("status");
-    const limit = c.req.query("limit") || "10";
-    const offset = c.req.query("offset") || "0";
-
-    // 如果沒有要求整合申請記錄，使用簡單查詢
-    if (application !== "true") {
-      const gig = await dbClient.query.gigs.findFirst({
-        where: and(eq(gigs.gigId, gigId), eq(gigs.employerId, user.employerId), eq(gigs.isActive, true)),
-      });
-
-      if (!gig) {
-        return c.text("工作不存在或無權限查看", 404);
-      }
-
-      return c.json(
-        {
-          ...gig,
-          environmentPhotos: await formatEnvironmentPhotos(gig.environmentPhotos),
-        },
-        200
-      );
-    }
-
-    const requestLimit = Number.parseInt(limit);
-    const requestOffset = Number.parseInt(offset);
-
-    // 先查詢工作詳情
     const gig = await dbClient.query.gigs.findFirst({
-      where: and(eq(gigs.gigId, gigId), eq(gigs.employerId, user.employerId), eq(gigs.isActive, true)),
+      where: and(eq(gigs.gigId, gigId), eq(gigs.employerId, user.employerId)),
     });
 
     if (!gig) {
       return c.text("工作不存在或無權限查看", 404);
     }
 
-    // 建立申請記錄查詢條件
-    const whereConditions = [eq(gigApplications.gigId, gigId)];
-    if (status && ["pending", "approved", "rejected", "cancelled"].includes(status)) {
-      whereConditions.push(eq(gigApplications.status, status as "pending" | "approved" | "rejected" | "cancelled"));
-    }
-
-    // 查詢申請記錄（在資料庫層面分頁，多查一筆來判斷 hasMore）
-    const applications = await dbClient.query.gigApplications.findMany({
-      where: and(...whereConditions),
-      with: {
-        worker: true,
-      },
-      orderBy: [desc(gigApplications.createdAt)],
-      limit: requestLimit + 1, // 多查一筆來判斷 hasMore
-      offset: requestOffset,
-    });
-
-    // 判斷是否有更多資料
-    const hasMore = applications.length > requestLimit;
-    const paginatedApplications = hasMore ? applications.slice(0, requestLimit) : applications;
-
-    // 整合回應
     return c.json(
       {
         ...gig,
         environmentPhotos: await formatEnvironmentPhotos(gig.environmentPhotos),
-        applications: {
-          data: paginatedApplications.map((app) => ({
-            applicationId: app.applicationId,
-            workerId: app.workerId,
-            workerName: `${app.worker.firstName} ${app.worker.lastName}`,
-            workerEmail: app.worker.email,
-            workerPhone: app.worker.phoneNumber,
-            workerEducation: app.worker.highestEducation,
-            workerSchool: app.worker.schoolName,
-            workerMajor: app.worker.major,
-            status: app.status,
-            appliedAt: app.createdAt,
-          })),
-          pagination: {
-            limit: requestLimit,
-            offset: requestOffset,
-            hasMore,
-            returned: paginatedApplications.length,
-          },
-        },
       },
       200
     );
@@ -799,6 +742,9 @@ router.patch("/:gigId/toggle-status", authenticated, requireEmployer, requireApp
         })
         .where(eq(gigs.gigId, gigId));
 
+      // 刪除該雇主的工作 Count 快取
+      await GigCache.clearMyGigsCount(user.employerId);
+
       return c.json(
         {
           message: "工作已停用",
@@ -810,6 +756,9 @@ router.patch("/:gigId/toggle-status", authenticated, requireEmployer, requireApp
     
     // 沒有已核准的申請者，直接刪除工作
     await dbClient.delete(gigs).where(eq(gigs.gigId, gigId));
+
+    // 刪除與該雇主相關的工作 Count 快取
+    await GigCache.clearMyGigsCount(user.employerId);
 
     return c.json(
       {
@@ -844,8 +793,13 @@ router.patch("/:gigId/toggle-listing", authenticated, requireEmployer, requireAp
     // 如果要上架工作，需要檢查一些條件
     if (!isCurrentlyListed) {
       // 檢查工作是否已過期
-      if (existingGig.dateEnd && existingGig.dateEnd < today) {
+      if (moment(existingGig.dateEnd).isBefore(today)) {
         return c.text("工作已過期，無法重新上架", 400);
+      }
+    }
+    else {
+      if (moment(existingGig.dateStart).isAfter(existingGig.publishedAt)) {
+        return c.text("工作尚未發佈，無法下架", 400);
       }
     }
 

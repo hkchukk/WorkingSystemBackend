@@ -530,7 +530,7 @@ router.put("/update/identification", authenticated, requireEmployer, uploadDocum
   const user = c.get("user");
   const uploadedFilesObj = c.get("uploadedFiles") as Record<string, any>;
   const body = await c.req.parseBody();
-  const files = uploadedFilesObj[(body.identificationType === "businessNo") ? "verficationDocument" : "identificationDocument"] || [];
+  const files = uploadedFilesObj[(body.identificationType === "businessNo") ? "verificationDocuments" : "identificationDocuments"] || [];
 
   try {
     if (files.length === 0) {

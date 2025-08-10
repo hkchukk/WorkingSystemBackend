@@ -107,13 +107,13 @@ export function createFileUploadMiddleware(configs: FileUploadConfig[]) {
 // 預定義的文件上傳中間件
 export const uploadDocument = createFileUploadMiddleware([
   {
-    name: "verficationDocument",
+    name: "verificationDocuments",
     maxSize: 2 * 1024 * 1024, // 2MB
     maxCount: 2,
     accept: ["pdf", "jpg", "jpeg", "png"],
   },
   {
-    name: "identificationDocument",
+    name: "identificationDocuments",
     maxSize: 2 * 1024 * 1024, // 2MB
     maxCount: 2,
     accept: ["pdf", "jpg", "jpeg", "png"],

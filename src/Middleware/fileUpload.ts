@@ -1,8 +1,6 @@
 import { createMiddleware } from "hono/factory";
 import type { HonoGenericContext } from "../Types/types";
 import { nanoid } from "nanoid";
-import { mkdir } from "node:fs/promises";
-import { dirname } from "node:path";
 
 // 文件類型定義
 export interface UploadedFile {
@@ -10,9 +8,7 @@ export interface UploadedFile {
   type: string;
   size: number;
   filename: string;
-  path: string;
   file: File; // 添加原始 File 物件的引用
-  arrayBuffer: () => Promise<ArrayBuffer>;
 }
 
 // 文件上傳配置
@@ -21,7 +17,6 @@ interface FileUploadConfig {
   maxSize: number; // in bytes
   maxCount: number;
   accept: string[];
-  dest?: string;
 }
 
 // 創建文件上傳中間件
@@ -29,7 +24,7 @@ export function createFileUploadMiddleware(configs: FileUploadConfig[]) {
   return createMiddleware<HonoGenericContext>(async (c, next) => {
     try {
       const body = await c.req.parseBody({ all: true });
-      const uploadedFiles: Record<string, UploadedFile | UploadedFile[]> = {};
+      const uploadedFiles: Record<string, UploadedFile | UploadedFile[] | null> = {};
 
       for (const config of configs) {
         // 處理單個或多個文件，並過濾出有效文件
@@ -38,13 +33,11 @@ export function createFileUploadMiddleware(configs: FileUploadConfig[]) {
         const fileArray = allFiles.filter(file => file instanceof File && file.name);
 
         if (!files || fileArray.length === 0) {
-          uploadedFiles[config.name] = [];
+          uploadedFiles[config.name] = config.maxCount === 1 ? null : [];
           continue;
         }
 
-        // 確定實際使用的欄位名稱
-        const actualFieldName = body[config.name] ? config.name : config.name + '[]';
-        console.log(`📁 處理 ${config.name} 檔案上傳 (實際欄位: ${actualFieldName}): 收到 ${fileArray.length} 個檔案，限制 ${config.maxCount} 個`);
+        console.log(`📁 處理 ${config.name} 檔案上傳: 收到 ${fileArray.length} 個檔案，限制 ${config.maxCount} 個`);
 
         // 驗證文件數量
         if (fileArray.length > config.maxCount) {
@@ -78,33 +71,13 @@ export function createFileUploadMiddleware(configs: FileUploadConfig[]) {
           const timestamp = Date.now();
           const randomSuffix = nanoid(8);
           const filename = `${timestamp}_${randomSuffix}.${fileExtension}`;
-          const filePath = `${config.dest || 'temp'}/${filename}`;
-
-          // 確保目錄存在
-          try {
-            await mkdir(dirname(filePath), { recursive: true });
-          } catch (mkdirError) {
-            console.warn(`目錄創建警告: ${mkdirError}`);
-          }
-
-          // 將檔案寫入磁碟
-          try {
-            const fileBuffer = await file.arrayBuffer();
-            await Bun.write(filePath, fileBuffer);
-          } catch (writeError) {
-            console.error(`檔案寫入失敗 ${filename}:`, writeError);
-            return c.text(`檔案寫入失敗: ${filename}`, 500);
-          }
-
           // 創建 UploadedFile 對象
           const uploadedFile: UploadedFile = {
             name: file.name,
             type: file.type,
             size: file.size,
             filename: filename,
-            path: filePath,
             file: file, // 保留原始 File 物件引用
-            arrayBuffer: () => file.arrayBuffer()
           };
 
           processedFiles.push(uploadedFile);
@@ -138,14 +111,12 @@ export const uploadDocument = createFileUploadMiddleware([
     maxSize: 2 * 1024 * 1024, // 2MB
     maxCount: 2,
     accept: ["pdf", "jpg", "jpeg", "png"],
-    dest: "src/uploads/verficationDocument"
   },
   {
     name: "identificationDocument",
     maxSize: 2 * 1024 * 1024, // 2MB
     maxCount: 2,
     accept: ["pdf", "jpg", "jpeg", "png"],
-    dest: "src/uploads/document"
   }
 ]);
 
@@ -155,7 +126,6 @@ export const uploadProfilePhoto = createFileUploadMiddleware([
     maxSize: 2 * 1024 * 1024, // 2MB
     maxCount: 1,
     accept: ["jpg", "jpeg", "png", "webp"],
-    dest: "src/uploads/temp"
   }
 ]);
 
@@ -165,6 +135,5 @@ export const uploadEnvironmentPhotos = createFileUploadMiddleware([
     maxSize: 5 * 1024 * 1024, // 5MB
     maxCount: 3,
     accept: ["jpg", "jpeg", "png", "webp"],
-    dest: "src/uploads/environmentPhotos"
   }
 ]);

@@ -71,26 +71,13 @@ export class CronManager {
       // Cron 表達式: 每天 15:00 UTC (等於台北時間 23:00)
       const schedule = "0 15 * * *";
 
-      // SQL 查詢，一次性處理所有過期工作和通知
+      // SQL 查詢：批量更新過期工作的狀態
       const command = `
         DO $$
         DECLARE
           taipei_today DATE := (NOW() AT TIME ZONE 'Asia/Taipei')::DATE;
         BEGIN
-          -- 先批量插入過期通知
-          INSERT INTO notifications (notification_id, receiver_id, title, message, type, created_at)
-          SELECT 
-            substr(translate(encode(gen_random_bytes(16), 'base64'), '/+', '_-'), 1, 21),
-            g.employer_id,
-            '工作已過期',
-            '您的工作「' || g.title || '」已到期下架。',
-            'gig_expired',
-            NOW()
-          FROM gigs g
-          WHERE g.date_end = taipei_today 
-          AND g.is_active = true;
-
-          -- 然後批量更新工作狀態
+          -- 批量更新工作狀態
           UPDATE gigs 
           SET 
             "unlisted_at" = taipei_today,
@@ -113,7 +100,7 @@ export class CronManager {
 
       console.log(`✅ 已創建自動下架工作的 cron 任務: ${jobName}`);
       console.log(`📅 執行時間: 每天台北時間 23:00 (UTC 15:00)`);
-      console.log("🎯 功能: 批量處理過期工作，發送通知並更新狀態");
+      console.log("🎯 功能: 批量處理過期工作");
       return true;
     } catch (error) {
       console.error(`❌ 創建 cron 任務 ${jobName} 失敗:`, error);
@@ -150,8 +137,6 @@ export class CronManager {
    * 初始化所有必要的 cron 任務
    */
   static async initializeCronJobs(): Promise<boolean> {
-    console.log("🔄 正在初始化 pg_cron 任務...");
-
     // 1. 檢查 pg_cron 擴展
     const hasExtension = await CronManager.checkPgCronExtension();
     if (!hasExtension) {

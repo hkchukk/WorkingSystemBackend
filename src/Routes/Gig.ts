@@ -37,7 +37,6 @@ async function handlePhotoUpload(reqFile: any, existingPhotos: any[] = []) {
   if (totalAfterAdd > 3) {
     const canAdd = 3 - existingPhotos.length;
     if (canAdd <= 0) {
-      FileManager.cleanupTempFiles(files);
       return {
         environmentPhotosInfo: existingPhotos,
         uploadedFiles: [],
@@ -47,8 +46,6 @@ async function handlePhotoUpload(reqFile: any, existingPhotos: any[] = []) {
       };
     }
     uploadedFiles = files.slice(0, canAdd);
-    const rejectedFiles = files.slice(canAdd);
-    FileManager.cleanupTempFiles(rejectedFiles);
     message = `只能添加${canAdd}張照片，已忽略多餘的${files.length - canAdd}張`;
   } else {
     message = `成功添加${files.length}張照片`;
@@ -83,14 +80,8 @@ async function handlePhotoUpload(reqFile: any, existingPhotos: any[] = []) {
   try {
     await Promise.all(
       uploadedFiles.map(async (file: any) => {
-        const currentFile = Bun.file(file.path);
-
-        // 檢查檔案是否存在
-        if (!(await currentFile.exists())) {
-          throw new Error(`檔案不存在: ${file.path}`);
-        }
-
-        await s3Client.write(`environment-photos/${file.filename}`, currentFile);
+        const key = `environment-photos/${file.filename}`;
+        await s3Client.file(key).write(file.file as Blob, { type: file.type });
         console.log(`環境照片 ${file.name} 上傳成功`);
       })
     );
@@ -469,8 +460,6 @@ router.post(
       }
 
       return c.text("伺服器內部錯誤", 500);
-    } finally {
-      FileManager.cleanupTempFiles(uploadedFiles);
     }
   }
 );
@@ -685,8 +674,6 @@ router.put(
       }
 
       return c.text("伺服器內部錯誤", 500);
-    } finally {
-      FileManager.cleanupTempFiles(uploadedFiles);
     }
   }
 );

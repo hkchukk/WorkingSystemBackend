@@ -21,14 +21,16 @@ import { Role } from "../Types/types";
 import { UserCache, FileManager, RatingCache, s3Client } from "../Client/Cache/Index";
 import NotificationHelper from "../Utils/NotificationHelper";
 import { requireEmployer } from "../Middleware/guards";
-import { promise } from "zod";
 import { sendEmail } from "../Client/EmailClient";
 
 const router = new Hono<HonoGenericContext>();
 
 // Worker Registration
 router.post("/register/worker", zValidator("form", workerSignupSchema), async (c) => {
+  if (c.get("session").get("id")) return c.text("已經登入", 401);
+  
   const platform = c.req.header("platform");
+
   if (!platform?.length) {
     return c.text("Platform is required", 400);
   }
@@ -101,7 +103,8 @@ router.post("/register/worker", zValidator("form", workerSignupSchema), async (c
 
 // Employer Registration
 router.post("/register/employer", uploadDocument, zValidator("form", employerSignupSchema), async (c) => {
-  const uploadedFiles = c.get("uploadedFiles") as any[];
+  if (c.get("session").get("id")) return c.text("已經登入", 401);
+  const uploadedFiles = c.get("uploadedFiles") as Record<string, any>;
   const body = c.req.valid("form");
   const fileType = (body.identificationType === "businessNo") ? "verficationDocument" : "identificationDocument";
   const files = uploadedFiles[fileType] || [];
@@ -137,15 +140,9 @@ router.post("/register/employer", uploadDocument, zValidator("form", employerSig
 
       // 上傳身份證明文件到 S3
       await Promise.all(
-        files.map(async (file: { path: string; filename: string; name: string }) => {
-          const currentFile = Bun.file(file.path);
-          if (!(await currentFile.exists())) {
-            throw new Error(`Verification document file not found: ${file.name}`);
-          }
-          await s3Client.write(
-            `documents/${identificationType}/${file.filename}`,
-            currentFile,
-          );
+        files.map(async (file: any) => {
+          const key = `documents/${identificationType}/${file.filename}`;
+          await s3Client.file(key).write(file.file as Blob, { type: file.type });
           console.log(`File ${file.name} uploaded successfully`);
         })
       );
@@ -193,9 +190,6 @@ router.post("/register/employer", uploadDocument, zValidator("form", employerSig
   } catch (error) {
     console.error("Error in register/employee:", error);
     return c.text("Internal server error", 500);
-  } finally {
-    // 清理臨時文件
-    FileManager.cleanupTempFiles(files);
   }
 });
 
@@ -532,7 +526,7 @@ router.put("/update/password", authenticated, async (c) => {
 });
 
 // Update Identification Documents
-router.put("/update/identification", authenticated, uploadDocument, async (c) => {
+router.put("/update/identification", authenticated, requireEmployer, uploadDocument, async (c) => {
   const user = c.get("user");
   const uploadedFilesObj = c.get("uploadedFiles") as Record<string, any>;
   const body = await c.req.parseBody();
@@ -551,99 +545,104 @@ router.put("/update/identification", authenticated, uploadDocument, async (c) =>
       return c.text("Invalid identification number", 400);
     }
 
-    if (user.role === Role.EMPLOYER) {
-      const uploadDBFiles = files.map((file: {filename: string; name: string; type: string }) => ({
-        originalName: file.name as string,
-        type: file.type as string,
-        r2Name: file.filename as string
-      }));
+    const uploadDBFiles = files.map((file: {filename: string; name: string; type: string }) => ({
+      originalName: file.name as string,
+      type: file.type as string,
+      r2Name: file.filename as string
+    }));
 
+    await Promise.all(
+      files.map(async (file: any) => {
+        const key = `identification/${user.userId}/${file.filename}`;
+        await s3Client.file(key).write(file.file as Blob, { type: file.type });
+      })
+    ); 
+
+    if(user.verificationDocuments && user.verificationDocuments.length > 0) {
       await Promise.all(
-        files.map(async (file: { path: string; filename: string; }) => {
-          const currentFile = Bun.file(file.path);
-          await s3Client.write(`identification/${user.userId}/${file.filename}`, currentFile);
+        user.verificationDocuments.map(async (doc: { r2Name: string }) => {
+          await s3Client.delete(`identification/${user.userId}/${doc.r2Name}`);
         })
-      ); 
-
-      if(user.verificationDocuments && user.verificationDocuments.length > 0) {
-        await Promise.all(
-          user.verificationDocuments.map(async (doc: { r2Name: string }) => {
-            await s3Client.delete(`identification/${user.userId}/${doc.r2Name}`);
-          })
-        );
-      }
-
-      await dbClient
-        .update(employers)
-        .set({
-          identificationType: body.identificationType,
-          identificationNumber: body.identificationNumber,
-          verificationDocuments: uploadDBFiles,
-          updatedAt: new Date(),
-        })
-        .where(eq(employers.employerId, user.employerId));
-
-      return c.text("verification documents updated successfully", 200);
+      );
     }
 
-    return c.text("Only employers can update identification documents", 403);
-  } finally {
-    // 清理臨時文件
-    if (files.length > 0) FileManager.cleanupTempFiles(files);
+    await dbClient
+      .update(employers)
+      .set({
+        identificationType: body.identificationType,
+        identificationNumber: body.identificationNumber,
+        verificationDocuments: uploadDBFiles,
+        updatedAt: new Date(),
+      })
+      .where(eq(employers.employerId, user.employerId));
+
+    return c.text("verification documents updated successfully", 200);
+  }
+  catch (error) {
+    console.error("Error updating identification documents:", error);
+    return c.text("Internal server error", 500);
+  }
+  finally {
     await UserCache.clearUserProfile(user.employerId, Role.EMPLOYER);
-    
   }
 });
 
 // Update Profile Photo
 router.put("/update/profilePhoto", authenticated, uploadProfilePhoto, async (c) => {
-  
   const user = c.get("user");
   const uploadedFilesObj = c.get("uploadedFiles") as Record<string, any>;
   const body = await c.req.parseBody();
-  
-  const photoFile = uploadedFilesObj.profilePhoto;
-  const photoData = {
-    originalName: photoFile.name,
-    type: photoFile.type,
-    r2Name: photoFile.filename,
-  };
+  const photoFile = uploadedFilesObj.profilePhoto as any | null;
+  const isDelete = String(body.deleteProfilePhoto) === "true";
+  if (!photoFile && !isDelete) return c.text("No profile photo uploaded", 400);
 
   try {
-    if (photoFile.length == 0 && body.deleteProfilePhoto == "true") {
-      if (user.employerPhoto == null) return c.text("No profile photo to delete", 200);
-      await s3Client.delete(`profile-photos/${user.role}s/${user.employerPhoto.r2Name}`);
-      await dbClient
-        .update(employers)
-        .set({
-          employerPhoto: null,
-          updatedAt: new Date(),
-        })
-        .where(eq(employers.employerId, user.employerId));
-      return c.text("個人照片已刪除", 200);
+    if (isDelete) {
+      if (user.role == Role.WORKER) {
+        if (!user.profilePhoto?.r2Name) return c.text("No profile photo to delete", 200);
+        await s3Client.delete(`profile-photos/workers/${user.profilePhoto.r2Name}`);
+        await dbClient
+          .update(workers)
+          .set({ profilePhoto: null, updatedAt: new Date() })
+          .where(eq(workers.workerId, user.userId));
+        return c.text("worker profile photo deleted", 200);
+      }
+
+      if (user.role == Role.EMPLOYER) {
+        if (!user.employerPhoto?.r2Name) return c.text("No profile photo to delete", 200);
+        await s3Client.delete(`profile-photos/employers/${user.employerPhoto.r2Name}`);
+        await dbClient
+          .update(employers)
+          .set({ employerPhoto: null, updatedAt: new Date() })
+          .where(eq(employers.employerId, user.employerId));
+        return c.text("employer profile photo deleted", 200);
+      }
+
+      return c.text("invalid role", 400);
     }
 
-    const currentFile = Bun.file(photoFile.path);
+    const photoData = {
+      originalName: photoFile.name as string,
+      type: photoFile.type as string,
+      r2Name: photoFile.filename as string,
+    };
 
     if (user.role == Role.WORKER) {
-      await s3Client.delete(`profile-photos/workers/${user.profilePhoto.r2Name}`);
-      await s3Client.write(`profile-photos/workers/${photoFile.filename}`, currentFile);
+      if (user.profilePhoto?.r2Name) await s3Client.delete(`profile-photos/workers/${user.profilePhoto.r2Name}`);
+      await s3Client.file(`profile-photos/workers/${photoFile.filename}`).write(photoFile.file as Blob, { type: photoFile.type });
+      
       await dbClient
         .update(workers)
         .set({
-          profilePhoto: {
-            originalName: photoData.originalName,
-            type: photoData.type,
-            r2Name: photoData.r2Name,
-          },
+          profilePhoto: photoData,
           updatedAt: new Date(),
         })
         .where(eq(workers.workerId, user.userId));
       return c.text("worker profile photo updated successfully", 200);
 
     } else if (user.role == Role.EMPLOYER) {
-      if (user.employerPhoto != null){await s3Client.delete(`profile-photos/employers/${user.employerPhoto.r2Name}`);}
-      await s3Client.write(`profile-photos/employers/${photoFile.filename}`, currentFile);
+      if (user.employerPhoto?.r2Name) await s3Client.delete(`profile-photos/employers/${user.employerPhoto.r2Name}`);
+      await s3Client.file(`profile-photos/employers/${photoFile.filename}`).write(photoFile.file as Blob, { type: photoFile.type });
       
       await dbClient
         .update(employers)
@@ -660,8 +659,11 @@ router.put("/update/profilePhoto", authenticated, uploadProfilePhoto, async (c) 
     console.error("更新個人照片時出錯:", error);
     return c.text("伺服器內部錯誤", 500);
   } finally {
-    if (photoFile.length > 0) FileManager.cleanupTempFiles([photoFile]);
-    await UserCache.clearUserProfile(user.employerId, Role.EMPLOYER);
+    if (user.role == Role.WORKER) {
+      await UserCache.clearUserProfile(user.workerId, Role.WORKER);
+    } else if (user.role == Role.EMPLOYER) {
+      await UserCache.clearUserProfile(user.employerId, Role.EMPLOYER);
+    }
   }
 });
 

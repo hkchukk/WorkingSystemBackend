@@ -618,7 +618,7 @@ router.put(
       // 檢查工作是否仍然有效
       if (!application.gig.isActive) {
         return c.json({
-          message: "此工作已停用，無法審核申請",
+          message: "此工作已結束，無法審核申請",
         }, 400);
       }
 

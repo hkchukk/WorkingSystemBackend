@@ -613,9 +613,9 @@ router.put(
         return c.text("工作不存在或無權限修改", 404);
       }
 
-      // 檢查工作是否已停用
+      // 檢查工作是否已結束
       if (!existingGig.isActive) {
-        return c.text("已停用的工作無法更新", 400);
+        return c.text("已結束的工作無法更新", 400);
       }
 
       // 檢查是否有申請中或已核准的申請
@@ -680,13 +680,13 @@ router.put(
   }
 );
 
-// 停用/刪除工作
+// 刪除工作
 router.patch("/:gigId/toggle-status", authenticated, requireEmployer, requireApprovedEmployer, async (c) => {
   const user = c.get("user");
   try {
     const gigId = c.req.param("gigId");
 
-    // 一次查詢獲取工作和申請資料
+    // 查詢獲取工作資料
     const gigWithApplications = await dbClient.query.gigs.findFirst({
       where: and(eq(gigs.gigId, gigId), eq(gigs.employerId, user.employerId)),
       with: {
@@ -707,46 +707,29 @@ router.patch("/:gigId/toggle-status", authenticated, requireEmployer, requireApp
       );
     }
 
-    // 如果工作已經停用，不允許操作
+    // 如果工作已經結束，不允許刪除
     if (!gigWithApplications.isActive) {
       return c.json(
         {
-          message: "工作已經停用，無法再次操作",
+          message: "工作已經結束，無法刪除",
           success: false,
         },
         400
       );
     }
 
-    const hasApprovedApplications = gigWithApplications.gigApplications.length > 0;
-
-    // 根據是否有已核准的申請者決定操作
-    if (hasApprovedApplications) {
-      // 有已核准的申請者，停用工作
-      await dbClient
-        .update(gigs)
-        .set({
-          isActive: false,
-          updatedAt: new Date(),
-        })
-        .where(eq(gigs.gigId, gigId));
-
-      // 刪除該雇主的工作 Count 快取
-      await GigCache.clearMyGigsCount(user.employerId);
-
+    // 檢查工作是否有已核准的申請者
+    if (gigWithApplications.gigApplications.length > 0) {
       return c.json(
         {
-          message: "工作已停用",
-          success: true,
+          message: "工作有已核准的申請者，無法刪除",
+          success: false,
         },
-        200
+        400
       );
     }
-    
-    // 沒有已核准的申請者，直接刪除工作
-    await dbClient.delete(gigs).where(eq(gigs.gigId, gigId));
 
-    // 刪除與該雇主相關的工作 Count 快取
+    await dbClient.delete(gigs).where(eq(gigs.gigId, gigId));
     await GigCache.clearMyGigsCount(user.employerId);
 
     return c.json(
@@ -757,7 +740,7 @@ router.patch("/:gigId/toggle-status", authenticated, requireEmployer, requireApp
       200
     );
   } catch (error) {
-    console.error("處理工作停用/刪除時出錯:", error);
+    console.error("刪除工作時出錯:", error);
     return c.text("伺服器內部錯誤", 500);
   }
 });
@@ -787,7 +770,7 @@ router.patch("/:gigId/toggle-listing", authenticated, requireEmployer, requireAp
       }
     }
     else {
-      if (moment(existingGig.dateStart).isAfter(existingGig.publishedAt)) {
+      if (moment(existingGig.publishedAt).format("YYYY-MM-DD") > today) {
         return c.text("工作尚未發佈，無法下架", 400);
       }
     }

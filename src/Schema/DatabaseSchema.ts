@@ -155,7 +155,7 @@ export const gigs = pgTable("gigs", {
   // 聯絡人Email
   contactEmail: varchar("contact_email", { length: 128 }),
 
-  // 是否啟用
+  // 工作是否進行中 (true: 進行中, false: 已結束)
   isActive: boolean("is_active").default(true),
 
   // 刊登時間

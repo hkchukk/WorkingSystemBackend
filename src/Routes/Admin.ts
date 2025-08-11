@@ -11,7 +11,7 @@ import { adminRegisterSchema } from "../Types/zodSchema";
 import { hash } from "@node-rs/argon2";
 import { argon2Config } from "../config";
 import NotificationHelper from "../Utils/NotificationHelper";
-import { UserCache } from "../Client/Cache/Index";
+import { UserCache } from "../Client/Cache/index";
 import { Role } from "../Types/types";
 
 const router = new Hono<HonoGenericContext>();

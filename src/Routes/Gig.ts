@@ -267,6 +267,8 @@ router.get("/public", async (c) => {
     const minRate = c.req.query("minRate");
     const maxRate = c.req.query("maxRate");
     const dateStart = c.req.query("dateStart");
+    //TODO: Semantic Search Implementation
+    const searchQuery = c.req.query("searchQuery");
 
     // 驗證 city 和 district 必須成對
     if (district && !city) {
@@ -284,16 +286,16 @@ router.get("/public", async (c) => {
     const maxRateFilter = maxRate ? Number.parseInt(maxRate) : null;
 
     /*
-		// 生成快取鍵
-		const filters = `public_${city || "all"}_${district || "all"}_${minRateFilter || "any"}_${maxRateFilter || "any"}_${dateStart || "any"}`;
-		
-		// 檢查快取
-		let cachedData = await GigCache.getGigList(filters, requestPage);
+    // 生成快取鍵
+    const filters = `public_${city || "all"}_${district || "all"}_${minRateFilter || "any"}_${maxRateFilter || "any"}_${dateStart || "any"}`;
+  	
+    // 檢查快取
+    let cachedData = await GigCache.getGigList(filters, requestPage);
 
-		if (cachedData) {
-			return c.json(cachedData, 200);
-		}
-		*/
+    if (cachedData) {
+      return c.json(cachedData, 200);
+    }
+    */
 
     // 處理日期邏輯
     const today = moment().format("YYYY-MM-DD");
@@ -650,17 +652,17 @@ router.put(
         hasPhotoOperation && addedCount > 0
           ? `工作更新成功，${message}`
           : hasPhotoOperation && addedCount === 0
-          ? `工作更新成功，${message}`
-          : "工作更新成功";
+            ? `工作更新成功，${message}`
+            : "工作更新成功";
 
       return c.json(
         {
           message: responseMessage,
           photoInfo: hasPhotoOperation
             ? {
-                totalPhotos: totalCount,
-                addedPhotos: addedCount,
-              }
+              totalPhotos: totalCount,
+              addedPhotos: addedCount,
+            }
             : undefined,
         },
         200

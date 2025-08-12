@@ -101,9 +101,14 @@ export const updatePasswordSchema = z.object({
 });
 
 /* gig route schemas */
+const requirementsObjectSchema = z.object({
+  skills: z.array(z.string()).min(1, "技能至少需要 1 筆"),
+  experience: z.string().min(1, "經驗不能為空"),
+});
+
 export const createGigSchema = z.object({
   title: z.string().min(1, "工作標題不能為空").max(256, "工作標題過長"),
-  description: z.any().optional(),
+  description: z.string().min(1, "工作描述不能為空").max(10000, "工作描述過長"),
   dateStart: z.coerce.date().refine((date) => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -142,14 +147,23 @@ export const createGigSchema = z.object({
     }
     throw new Error("時間格式不正確 (應為 HH:MM)");
   }),
-  requirements: z.any().optional(),
+  requirements: z.preprocess((val) => {
+    if (typeof val === "string") {
+      try {
+        return JSON.parse(val);
+      } catch {
+        return val;
+      }
+    }
+    return val;
+  }, requirementsObjectSchema),
   hourlyRate: z.coerce.number().min(1, "時薪必須大於 0").max(10000, "時薪過高"),
   city: z.string().min(1, "城市不能為空").max(32, "城市名稱過長"),
   district: z.string().min(1, "地區不能為空").max(32, "地區名稱過長"),
   address: z.string().min(1, "地址不能為空").max(256, "地址過長"),
   contactPerson: z.string().min(1, "聯絡人不能為空").max(32, "聯絡人姓名過長"),
   contactPhone: z.string().regex(/^(09\d{8}|\+8869\d{8}|0\d{1,2}-?\d{6,8})$/, "聯絡電話格式不正確").optional(),
-  contactEmail: z.string().email("聯絡人 Email 格式不正確").max(128, "Email 過長").optional(),
+  contactEmail: z.email("聯絡人 Email 格式不正確").max(128, "Email 過長").optional(),
   publishedAt: z.coerce.date().refine((date) => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -207,7 +221,7 @@ export const createGigSchema = z.object({
 
 export const updateGigSchema = z.object({
   title: z.string().min(1, "工作標題不能為空").max(256, "工作標題過長").optional(),
-  description: z.any().optional(),
+  description: z.string().min(1, "工作描述不能為空").max(10000, "工作描述過長").optional(),
   dateStart: z.coerce.date().optional().refine((date) => {
     if (!date) return true; // 可選字段，沒值就通過
     const today = new Date();
@@ -248,14 +262,23 @@ export const updateGigSchema = z.object({
     }
     throw new Error("時間格式不正確 (應為 HH:MM)");
   }).optional(),
-  requirements: z.any().optional(),
+  requirements: z.preprocess((val) => {
+    if (typeof val === "string") {
+      try {
+        return JSON.parse(val);
+      } catch {
+        return val;
+      }
+    }
+    return val;
+  }, requirementsObjectSchema).optional(),
   hourlyRate: z.coerce.number().min(1, "時薪必須大於 0").max(10000, "時薪過高").optional(),
   city: z.string().min(1, "城市不能為空").max(32, "城市名稱過長").optional(),
   district: z.string().min(1, "地區不能為空").max(32, "地區名稱過長").optional(),
   address: z.string().min(1, "地址不能為空").max(256, "地址過長").optional(),
   contactPerson: z.string().min(1, "聯絡人不能為空").max(32, "聯絡人姓名過長").optional(),
   contactPhone: z.string().regex(/^(09\d{8}|\+8869\d{8}|0\d{1,2}-?\d{6,8})$/, "聯絡電話格式不正確").optional(),
-  contactEmail: z.string().email("聯絡人 Email 格式不正確").max(128, "Email 過長").optional(),
+  contactEmail: z.email("聯絡人 Email 格式不正確").max(128, "Email 過長").optional(),
   publishedAt: z.coerce.date().optional().refine((date) => {
     if (!date) return true; // 可選字段，沒值就通過
     const today = new Date();

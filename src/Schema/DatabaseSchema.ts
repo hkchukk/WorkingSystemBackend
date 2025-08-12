@@ -125,7 +125,7 @@ export const gigs = pgTable("gigs", {
   // 工作標題
   title: varchar("title", { length: 256 }).notNull(),
   // 工作描述
-  description: json("description"), // 可放工作需求、時薪等
+  description: text("description").notNull(), // 時薪等
 
   // 工作日期
   dateStart: date("date_start").notNull(),
@@ -134,7 +134,7 @@ export const gigs = pgTable("gigs", {
   timeStart: varchar("time_start", { length: 20 }).notNull(),
   timeEnd: varchar("time_end", { length: 20 }).notNull(),
   // 工作需求
-  requirements: json("requirements"),
+  requirements: json("requirements").default([]),
 
   // 時薪
   hourlyRate: integer("hourly_rate").notNull(),
@@ -146,7 +146,7 @@ export const gigs = pgTable("gigs", {
   address: varchar("address", { length: 256 }).notNull(),
 
   // 打工環境照上傳，可存多張圖檔路徑
-  environmentPhotos: json("environment_photos"),
+  environmentPhotos: json("environment_photos").default([]),
 
   // 聯絡人
   contactPerson: varchar("contact_person", { length: 32 }).notNull(),

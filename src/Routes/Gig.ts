@@ -113,7 +113,7 @@ async function formatEnvironmentPhotos(environmentPhotos: any, limit?: number) {
       photosToProcess.map(async (photo: any) => {
         // 檢查照片物件是否有效
         if (!photo || !photo.filename) {
-          console.warn('❌ 照片物件缺少 filename:', photo);
+          console.warn('照片物件缺少 filename:', photo);
           return {
             url: null,
             error: "照片資料不完整",
@@ -122,11 +122,10 @@ async function formatEnvironmentPhotos(environmentPhotos: any, limit?: number) {
           };
         }
 
-        console.log(`🔄 正在為環境照片生成 URL: ${photo.filename}`);
         const presignedUrl = await FileManager.getPresignedUrl(`environment-photos/${photo.filename}`);
 
         if (!presignedUrl) {
-          console.warn(`❌ 環境照片 URL 生成失敗: ${photo.filename}`);
+          console.warn(`環境照片 URL 生成失敗: ${photo.filename}`);
           return {
             url: null,
             error: "圖片連結生成失敗",
@@ -765,7 +764,7 @@ router.patch("/:gigId/toggle-listing", authenticated, requireEmployer, requireAp
     // 如果要上架工作，需要檢查一些條件
     if (!isCurrentlyListed) {
       // 檢查工作是否已過期
-      if (moment(existingGig.dateEnd).isBefore(today)) {
+      if (moment(existingGig.dateEnd).format("YYYY-MM-DD") < today) {
         return c.text("工作已過期，無法重新上架", 400);
       }
     }

@@ -50,7 +50,7 @@ app.post("/send-test-email", async (c) => {
 });
 
 // 載入路由
-for await (const file of new Glob(`${__dirname}/routes/**/*.ts`).scan({
+for await (const file of new Glob(`${__dirname}/Routes/**/*.ts`).scan({
   absolute: true,
 })) {
   const module = await import(file);

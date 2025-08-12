@@ -266,7 +266,6 @@ router.get("/public", async (c) => {
     const minRate = c.req.query("minRate");
     const maxRate = c.req.query("maxRate");
     const dateStart = c.req.query("dateStart");
-    //TODO: Semantic Search Implementation
     const searchQuery = c.req.query("searchQuery");
 
     // 驗證 city 和 district 必須成對
@@ -313,6 +312,9 @@ router.get("/public", async (c) => {
     minRateFilter ? whereConditions.push(gte(gigs.hourlyRate, minRateFilter)) : null;
     maxRateFilter ? whereConditions.push(lte(gigs.hourlyRate, maxRateFilter)) : null;
 
+    // PGroonga 關鍵字搜尋（title / description 任一符合）
+    searchQuery ? whereConditions.push(sql`(${gigs.title} &@~ ${searchQuery} OR ${gigs.description} &@~ ${searchQuery})`) : null;
+
     const availableGigs = await dbClient.query.gigs.findMany({
       where: and(...whereConditions),
       orderBy: [
@@ -348,6 +350,7 @@ router.get("/public", async (c) => {
         minRate: minRateFilter,
         maxRate: maxRateFilter,
         dateStart: searchDateStart,
+        searchQuery: searchQuery || null,
       },
     };
 

@@ -7,6 +7,7 @@ import {
   integer,
   json,
   date,
+  index,
 } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
 import { nanoid } from "nanoid";
@@ -123,7 +124,7 @@ export const gigs = pgTable("gigs", {
     .references(() => employers.employerId, { onDelete: "cascade" }),
 
   // 工作標題
-  title: varchar("title", { length: 256 }).notNull(),
+  title: text("title").notNull(),
   // 工作描述
   description: text("description").notNull(), // 時薪等
 
@@ -167,7 +168,16 @@ export const gigs = pgTable("gigs", {
   createdAt: timestamp("created_at").defaultNow(),
   // 工作ID更新時間
   updatedAt: timestamp("updated_at").defaultNow(),
-});
+}, (t) => [
+  // PGroonga 索引：title
+  index("pgroonga_gigs_index")
+    .using("pgroonga", t.title)
+    .with({ tokenizer: "'TokenBigramSplitSymbol'" }),
+  // PGroonga 索引：description
+  index("pgroonga2_gigs_index")
+    .using("pgroonga", t.description)
+    .with({ tokenizer: "'TokenBigramSplitSymbol'" }),
+]);
 
 // ========== 4. 工作申請表（GigApplications） ==========
 export const gigApplications = pgTable(

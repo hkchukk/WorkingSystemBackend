@@ -13,7 +13,7 @@ import { sendEmail } from "./Client/EmailClient";
 const app = new Hono<HonoGenericContext>();
 const store = new CookieStore();
 
-app.use("*", cors({ origin: "http://localhost:4321/", credentials: true }));
+app.use("*", cors({ origin: process.env.FRONTENDCONTAINER ??"http://localhost:4321/", credentials: true }));
 
 app.use(
   "*",

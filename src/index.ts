@@ -13,13 +13,13 @@ import { sendEmail } from "./Client/EmailClient";
 const app = new Hono<HonoGenericContext>();
 const store = new CookieStore();
 
-app.use("*", cors({ origin: `http://${process.env.FRONTENDCONTAINER ?? "localhost"}:4321/`, credentials: true }));
+app.use("*", cors({ origin: "*", credentials: true }));
 
 app.use(
   "*",
   sessionMiddleware({
     store,
-    cookieOptions: { maxAge: 60 * 60 * 24, secure: true },
+    cookieOptions: { maxAge: 60 * 60 * 24, secure: false },
     expireAfterSeconds: 60 * 60 * 24,
     autoExtendExpiration: true,
     encryptionKey: Bun.env.SESSIONSECRET,

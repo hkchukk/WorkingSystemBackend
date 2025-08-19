@@ -27,7 +27,7 @@ app.use(
 );
 
 app.get("/", (c) => {
-  return c.text("Hello World!");
+  return c.text("Hello!");
 });
 
 app.get("/hashing/:password", async (c) => {

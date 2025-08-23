@@ -13,7 +13,7 @@ import { authenticate, authenticated, deserializeUser } from "../Middleware/auth
 import { uploadDocument, uploadProfilePhoto } from "../Middleware/fileUpload";
 import type IRouter from "../Interfaces/IRouter";
 import dbClient from "../Client/DrizzleClient";
-import { eq, avg, count } from "drizzle-orm";
+import { eq, avg, count, sql } from "drizzle-orm";
 import { employers, workers, workerRatings, employerRatings } from "../Schema/DatabaseSchema";
 import { argon2Config } from "../config";
 import { hash as argon2hash, verify } from "@node-rs/argon2";
@@ -402,7 +402,7 @@ router.put("/update/profile", authenticated, async (c) => {
 
       const updatedWorker = await dbClient
         .update(workers)
-        .set({ ...validatedData, updatedAt: new Date() })
+        .set({ ...validatedData, updatedAt: sql`now()` })
         .where(eq(workers.workerId, user.workerId))
         .returning();
 
@@ -432,7 +432,7 @@ router.put("/update/profile", authenticated, async (c) => {
 
       const updatedEmployer = await dbClient
         .update(employers)
-        .set({ ...validatedData, updatedAt: new Date() })
+        .set({ ...validatedData, updatedAt: sql`now()` })
         .where(eq(employers.employerId, user.employerId))
         .returning();
 
@@ -494,7 +494,7 @@ router.put("/update/password", authenticated, async (c) => {
 
       const hashedNewPassword = await argon2hash(newPassword, argon2Config);
 
-      await dbClient.update(workers).set({ password: hashedNewPassword, updatedAt: new Date() }).where(eq(workers.workerId, user.workerId));
+      await dbClient.update(workers).set({ password: hashedNewPassword, updatedAt: sql`now()` }).where(eq(workers.workerId, user.workerId));
 
       return c.text("Password updated successfully");
     } else if (user.role === Role.EMPLOYER) {
@@ -513,7 +513,7 @@ router.put("/update/password", authenticated, async (c) => {
 
       const hashedNewPassword = await argon2hash(newPassword, argon2Config);
 
-      await dbClient.update(employers).set({ password: hashedNewPassword, updatedAt: new Date() }).where(eq(employers.employerId, user.employerId));
+      await dbClient.update(employers).set({ password: hashedNewPassword, updatedAt: sql`now()` }).where(eq(employers.employerId, user.employerId));
 
       return c.text("Password updated successfully");
     } else {
@@ -572,7 +572,7 @@ router.put("/update/identification", authenticated, requireEmployer, uploadDocum
         identificationType: body.identificationType,
         identificationNumber: body.identificationNumber,
         verificationDocuments: uploadDBFiles,
-        updatedAt: new Date(),
+        updatedAt: sql`now()`,
       })
       .where(eq(employers.employerId, user.employerId));
 
@@ -603,7 +603,7 @@ router.put("/update/profilePhoto", authenticated, uploadProfilePhoto, async (c) 
         await s3Client.delete(`profile-photos/workers/${user.profilePhoto.r2Name}`);
         await dbClient
           .update(workers)
-          .set({ profilePhoto: null, updatedAt: new Date() })
+          .set({ profilePhoto: null, updatedAt: sql`now()` })
           .where(eq(workers.workerId, user.userId));
         return c.text("worker profile photo deleted", 200);
       }
@@ -613,7 +613,7 @@ router.put("/update/profilePhoto", authenticated, uploadProfilePhoto, async (c) 
         await s3Client.delete(`profile-photos/employers/${user.employerPhoto.r2Name}`);
         await dbClient
           .update(employers)
-          .set({ employerPhoto: null, updatedAt: new Date() })
+          .set({ employerPhoto: null, updatedAt: sql`now()` })
           .where(eq(employers.employerId, user.employerId));
         return c.text("employer profile photo deleted", 200);
       }
@@ -635,7 +635,7 @@ router.put("/update/profilePhoto", authenticated, uploadProfilePhoto, async (c) 
         .update(workers)
         .set({
           profilePhoto: photoData,
-          updatedAt: new Date(),
+          updatedAt: sql`now()`,
         })
         .where(eq(workers.workerId, user.userId));
       return c.text("worker profile photo updated successfully", 200);
@@ -648,7 +648,7 @@ router.put("/update/profilePhoto", authenticated, uploadProfilePhoto, async (c) 
         .update(employers)
         .set({
           employerPhoto: photoData,
-          updatedAt: new Date(),
+          updatedAt: sql`now()`,
         })
         .where(eq(employers.employerId, user.employerId));
       

@@ -3,7 +3,7 @@ import { authenticated } from "../Middleware/authentication";
 import type IRouter from "../Interfaces/IRouter";
 import type { HonoGenericContext } from "../Types/types";
 import dbClient from "../Client/DrizzleClient";
-import { eq, and, desc, inArray } from "drizzle-orm";
+import { eq, and, desc, inArray, sql } from "drizzle-orm";
 import { notifications } from "../Schema/DatabaseSchema";
 import { zValidator } from "@hono/zod-validator";
 import { createNotificationSchema, markAsReadSchema, createBatchNotificationSchema, createGroupNotificationSchema } from "../Types/zodSchema";
@@ -109,13 +109,12 @@ router.put("/mark-as-read", authenticated, zValidator("json", markAsReadSchema),
     const isRead = isReadParam === undefined ? true : isReadParam === "true";
 
     // 驗證通知是否屬於當前用戶並批量更新
-    const currentDate = new Date();
     const result = await dbClient
       .update(notifications)
       .set({
         isRead: isRead,
-        readAt: isRead ? currentDate : null,
-        updatedAt: currentDate,
+        readAt: isRead ? sql`now()` : null,
+        updatedAt: sql`now()`,
       })
       .where(and(
         eq(notifications.receiverId, user.workerId || user.employerId || user.adminId),

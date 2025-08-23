@@ -142,7 +142,7 @@ router.post("/cancel/:applicationId", authenticated, requireWorker, async (c) =>
       .update(gigApplications)
       .set({
         status: "cancelled",
-        updatedAt: new Date(),
+        updatedAt: sql`now()`,
       })
       .where(eq(gigApplications.applicationId, applicationId));
 
@@ -643,7 +643,7 @@ router.put(
         .update(gigApplications)
         .set({
           status: status,
-          updatedAt: new Date(),
+          updatedAt: sql`now()`,
         })
         .where(eq(gigApplications.applicationId, applicationId));
 

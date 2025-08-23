@@ -212,7 +212,7 @@ router.delete("/deleteFile/:filename", authenticated, async (c) => {
       .update(gigs)
       .set({
         environmentPhotos: updatedPhotos.length > 0 ? updatedPhotos : [],
-        updatedAt: new Date(),
+        updatedAt: sql`now()`,
       })
       .where(eq(gigs.gigId, targetGig.gigId));
 
@@ -561,7 +561,6 @@ router.get("/:gigId", authenticated, requireEmployer, async (c) => {
       where: and(
         eq(attendanceCodes.gigId, gigId),
         eq(attendanceCodes.validDate, today),
-        eq(attendanceCodes.isActive, true)
       )
     });
 
@@ -579,14 +578,13 @@ router.get("/:gigId", authenticated, requireEmployer, async (c) => {
     } else {
       // 生成新的打卡碼
       attendanceCode = generateAttendanceCode();
-      const expiresAt = moment().endOf('day').toDate();
       
       // 儲存打卡碼到資料庫
       const [newCode] = await dbClient.insert(attendanceCodes).values({
         gigId,
         attendanceCode,
         validDate: today,
-        expiresAt
+        expiresAt: sql`(CURRENT_DATE + INTERVAL '1 day' - INTERVAL '1 second')`
       }).returning();
       
       attendanceCodeInfo = {
@@ -662,7 +660,7 @@ router.put(
         .update(gigs)
         .set({
           ...body,
-          updatedAt: new Date(),
+          updatedAt: sql`now()`,
           dateStart: body.dateStart ? moment(body.dateStart).format("YYYY-MM-DD") : undefined,
           dateEnd: body.dateEnd ? moment(body.dateEnd).format("YYYY-MM-DD") : undefined,
           publishedAt: body.publishedAt ? moment(body.publishedAt).format("YYYY-MM-DD") : undefined,
@@ -808,7 +806,7 @@ router.patch("/:gigId/toggle-listing", authenticated, requireEmployer, requireAp
       .update(gigs)
       .set({
         unlistedAt: newUnlistedAt,
-        updatedAt: new Date(),
+        updatedAt: sql`now()`,
       })
       .where(eq(gigs.gigId, gigId));
 

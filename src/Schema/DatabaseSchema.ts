@@ -274,12 +274,6 @@ export const attendanceCodes = pgTable("attendance_codes", {
   // 有效日期
   validDate: date("valid_date").notNull(),
   
-  // 是否已激活
-  isActive: boolean("is_active").default(true),
-  
-  // 生成時間
-  generatedAt: timestamp("generated_at").defaultNow(),
-  
   // 過期時間
   expiresAt: timestamp("expires_at").notNull(),
   

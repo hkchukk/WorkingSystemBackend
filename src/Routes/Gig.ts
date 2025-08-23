@@ -5,12 +5,13 @@ import type IRouter from "../Interfaces/IRouter";
 import type { HonoGenericContext } from "../Types/types";
 import dbClient from "../Client/DrizzleClient";
 import { eq, and, desc, sql, gte, lte, or, lt, gt, count } from "drizzle-orm";
-import { gigs, gigApplications } from "../Schema/DatabaseSchema";
+import { gigs, gigApplications, attendanceCodes } from "../Schema/DatabaseSchema";
 import { zValidator } from "@hono/zod-validator";
 import { createGigSchema, updateGigSchema } from "../Types/zodSchema";
 import { uploadEnvironmentPhotos } from "../Middleware/fileUpload";
 import moment from "moment";
 import { FileManager, s3Client, GigCache } from "../Client/Cache/Index";
+import { generateAttendanceCode } from "../Utils/AttendanceUtils";
 
 const router = new Hono<HonoGenericContext>();
 
@@ -152,43 +153,20 @@ async function formatEnvironmentPhotos(environmentPhotos: any, limit?: number) {
 // 構建工作數據物件
 function buildGigData(body: any, user: any, environmentPhotosInfo: any) {
   const {
-    title,
-    description,
     dateStart,
     dateEnd,
-    timeStart,
-    timeEnd,
-    requirements,
-    hourlyRate,
-    city,
-    district,
-    address,
-    contactPerson,
-    contactPhone,
-    contactEmail,
     publishedAt,
     unlistedAt,
   } = body;
 
   return {
     employerId: user.employerId,
-    title,
-    description,
+    ...body,
     dateStart: dateStart ? moment(dateStart).format("YYYY-MM-DD") : null,
     dateEnd: dateEnd ? moment(dateEnd).format("YYYY-MM-DD") : null,
-    timeStart,
-    timeEnd,
-    requirements,
-    hourlyRate,
-    city,
-    district,
-    address,
-    contactPerson,
-    contactPhone,
-    contactEmail,
-    environmentPhotos: environmentPhotosInfo ? environmentPhotosInfo : null,
     publishedAt: publishedAt ? moment(publishedAt).format("YYYY-MM-DD") : moment().format("YYYY-MM-DD"),
     unlistedAt: unlistedAt ? moment(unlistedAt).format("YYYY-MM-DD") : null,
+    environmentPhotos: environmentPhotosInfo ? environmentPhotosInfo : null,
   };
 }
 
@@ -451,7 +429,7 @@ router.post(
             environmentPhotos: environmentPhotosInfo,
             isActive: newGig.isActive,
             createdAt: newGig.createdAt,
-          },
+          }
         },
         201
       );
@@ -576,10 +554,54 @@ router.get("/:gigId", authenticated, requireEmployer, async (c) => {
       return c.text("工作不存在或無權限查看", 404);
     }
 
+    // 檢查當天是否已有打卡碼
+    const today = moment().format("YYYY-MM-DD");
+    const existingCode = await dbClient.query.attendanceCodes.findFirst({
+      where: and(
+        eq(attendanceCodes.gigId, gigId),
+        eq(attendanceCodes.validDate, today),
+        eq(attendanceCodes.isActive, true)
+      )
+    });
+
+    let attendanceCode: string;
+    let attendanceCodeInfo: any;
+
+    if (existingCode) {
+      // 使用現有的打卡碼
+      attendanceCode = existingCode.attendanceCode;
+      attendanceCodeInfo = {
+        attendanceCode,
+        validDate: existingCode.validDate,
+        expiresAt: existingCode.expiresAt,
+      };
+    } else {
+      // 生成新的打卡碼
+      attendanceCode = generateAttendanceCode();
+      const expiresAt = moment().endOf('day').toDate();
+      
+      // 儲存打卡碼到資料庫
+      const [newCode] = await dbClient.insert(attendanceCodes).values({
+        gigId,
+        attendanceCode,
+        validDate: today,
+        expiresAt
+      }).returning();
+      
+      attendanceCodeInfo = {
+        attendanceCode,
+        validDate: newCode.validDate,
+        expiresAt: newCode.expiresAt,
+      };
+      
+      console.log(`生成新打卡碼 - 工作ID: ${gigId}, 打卡碼: ${attendanceCode}`);
+    }
+
     return c.json(
       {
         ...gig,
         environmentPhotos: await formatEnvironmentPhotos(gig.environmentPhotos),
+        attendanceCodeInfo
       },
       200
     );

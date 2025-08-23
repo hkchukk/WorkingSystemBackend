@@ -436,3 +436,43 @@ export const createGroupNotificationSchema = z.object({
   type: notificationTypeEnum,
   resourceId: z.string().min(1).optional(),
 });
+
+/* attendance system schemas */
+
+// 打工者打卡
+export const attendanceCheckSchema = z.object({
+  workerId: z.string().min(1, "打工者ID不能為空"),
+  gigId: z.string().min(1, "工作ID不能為空"),
+  attendanceCode: z.string()
+    .length(4, "打卡碼必須是4位數字")
+    .regex(/^\d{4}$/, "打卡碼只能包含數字"),
+  checkType: z.enum(["check_in", "check_out"], {
+    message: "打卡類型必須是check_in或check_out",
+  }),
+});
+
+// 查詢打卡記錄
+export const getAttendanceRecordsSchema = z.object({
+  gigId: z.string().min(1, "工作ID不能為空").optional(),
+  workerId: z.string().min(1, "打工者ID不能為空").optional(),
+  dateStart: z.coerce.date().optional(),
+  dateEnd: z.coerce.date().optional(),
+  checkType: z.enum(["check_in", "check_out"]).optional(),
+  limit: z.coerce.number().min(1).max(100).default(10),
+  offset: z.coerce.number().min(0).default(0),
+}).refine((data) => {
+  // 必須提供 gigId 或 workerId 至少一個
+  return data.gigId || data.workerId;
+}, {
+  message: "必須提供工作ID或打工者ID至少一個",
+  path: ["gigId", "workerId"]
+}).refine((data) => {
+  // 如果提供了日期範圍，結束日期不能早於開始日期
+  if (data.dateStart && data.dateEnd) {
+    return data.dateEnd >= data.dateStart;
+  }
+  return true;
+}, {
+  message: "結束日期不能早於開始日期",
+  path: ["dateEnd"]
+});

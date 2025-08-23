@@ -416,6 +416,7 @@ router.post(
 
       // 創建工作
       const insertedGig = await dbClient.insert(gigs).values(gigData).returning();
+      await GigCache.clearMyGigsCount(user.employerId);
 
       const newGig = insertedGig[0];
 
@@ -476,7 +477,7 @@ router.get("/my-gigs", authenticated, requireEmployer, async (c) => {
 
     const myGigs = await dbClient.query.gigs.findMany({
       where: and(...whereConditions),
-      orderBy: [desc(gigs.createdAt)],
+      orderBy: [desc(gigs.createdAt), desc(gigs.gigId)],
       columns: {
         gigId: true,
         title: true,
@@ -678,6 +679,8 @@ router.put(
           : hasPhotoOperation && addedCount === 0
             ? `工作更新成功，${message}`
             : "工作更新成功";
+
+      await GigCache.clearMyGigsCount(user.employerId);
 
       return c.json(
         {

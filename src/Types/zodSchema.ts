@@ -455,24 +455,17 @@ export const attendanceCheckSchema = z.object({
 export const getAttendanceRecordsSchema = z.object({
   gigId: z.string().min(1, "工作ID不能為空").optional(),
   workerId: z.string().min(1, "打工者ID不能為空").optional(),
-  dateStart: z.coerce.date().optional(),
-  dateEnd: z.coerce.date().optional(),
-  checkType: z.enum(["check_in", "check_out"]).optional(),
-  limit: z.coerce.number().min(1).max(100).default(10),
-  offset: z.coerce.number().min(0).default(0),
+  checkType: z.enum(["check_in", "check_out"]).optional()
 }).refine((data) => {
-  // 必須提供 gigId 或 workerId 至少一個
   return data.gigId || data.workerId;
 }, {
   message: "必須提供工作ID或打工者ID至少一個",
   path: ["gigId", "workerId"]
-}).refine((data) => {
-  // 如果提供了日期範圍，結束日期不能早於開始日期
-  if (data.dateStart && data.dateEnd) {
-    return data.dateEnd >= data.dateStart;
-  }
-  return true;
-}, {
-  message: "結束日期不能早於開始日期",
-  path: ["dateEnd"]
+});
+
+// 雇主修改打卡記錄
+export const updateAttendanceRecordSchema = z.object({
+  recordId: z.string().min(1, "記錄ID不能為空"),
+  status: z.enum(["on_time", "late", "early"]),
+  notes: z.string().min(1, "備註不能為空").max(500, "備註不能超過500字"),
 });

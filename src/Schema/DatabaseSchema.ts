@@ -306,9 +306,6 @@ export const attendanceRecords = pgTable("attendance_records", {
     enum: ["check_in", "check_out"],
   }).notNull(),
   
-  // 打卡時間
-  checkTime: timestamp("check_time").defaultNow().notNull(),
-  
   // 工作日期
   workDate: date("work_date").notNull(),
   
@@ -320,7 +317,9 @@ export const attendanceRecords = pgTable("attendance_records", {
   // 備註
   notes: text("notes"),
   
-  createdAt: timestamp("created_at").defaultNow(),
+  // 打卡時間
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow(),
 });
 
 // ========== 9. 系統通知（Notifications） ==========

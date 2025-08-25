@@ -8,7 +8,8 @@ import { verify } from "@node-rs/argon2"
 import { argon2Config } from "../config"
 import type { Session } from "hono-sessions"
 import { UserCache } from "../Client/Cache/Index"
-import SessionManager from "../Utils/SessionManager";
+import SessionManager from "../Utils/SessionManager"
+import { LoginAttemptManager } from "../Utils/LoginAttemptManager";
 
 export const authenticate = createMiddleware<HonoGenericContext>(async (c, next) => {
     const session = c.get("session");
@@ -32,6 +33,15 @@ export const authenticate = createMiddleware<HonoGenericContext>(async (c, next)
     }
 
     const { email, password } = user;
+    
+    // 檢查用戶登錄狀態
+    const loginStatus = await LoginAttemptManager.getLoginStatus(email);
+
+    if (loginStatus.isLocked) {
+        const minutes = Math.ceil(loginStatus.remainingLockTime / 60);
+        return c.text(`帳號已被鎖定，請 ${minutes} 分鐘後再試`, 423);
+    }
+    
     if (platform === "web-employer") {
         const employer = await dbClient.query.employers.findFirst({
             where: eq(employers.email, email),
@@ -45,8 +55,13 @@ export const authenticate = createMiddleware<HonoGenericContext>(async (c, next)
             argon2Config,
         );
         if (!passwordCorrect) {
-            return c.text("Incorrect password", 401);
+            const { isLocked: newLock, attemptsLeft } = await LoginAttemptManager.recordFailedAttempt(email);
+            if (newLock) {
+                return c.text("密碼錯誤次數過多，帳號已被鎖定 5 分鐘", 423);
+            }
+            return c.text(`密碼錯誤，剩餘嘗試次數：${attemptsLeft}`, 401);
         }
+        
         const payload: sessionUser = {
             id: employer.employerId,
             role: Role.EMPLOYER,
@@ -56,6 +71,7 @@ export const authenticate = createMiddleware<HonoGenericContext>(async (c, next)
         session.set("role", payload.role);
         const realSessionId = session.getCache()._id;
         await SessionManager.track(payload.id, realSessionId);
+        await LoginAttemptManager.clearFailedAttempts(email);
         return next();
     }
 
@@ -72,8 +88,13 @@ export const authenticate = createMiddleware<HonoGenericContext>(async (c, next)
             argon2Config,
         );
         if (!passwordCorrect) {
-            return c.text("Incorrect password", 401);
+            const { isLocked: newLock, attemptsLeft } = await LoginAttemptManager.recordFailedAttempt(email);
+            if (newLock) {
+                return c.text("密碼錯誤次數過多，帳號已被鎖定 5 分鐘", 423);
+            }
+            return c.text(`密碼錯誤，剩餘嘗試次數：${attemptsLeft}`, 401);
         }
+        
         const payload: sessionUser = {
             id: admin.adminId,
             role: Role.ADMIN,
@@ -83,6 +104,7 @@ export const authenticate = createMiddleware<HonoGenericContext>(async (c, next)
         session.set("role", payload.role);
         const realSessionId = session.getCache()._id;
         await SessionManager.track(payload.id, realSessionId);
+        await LoginAttemptManager.clearFailedAttempts(email);
         return next();
     }
 
@@ -99,8 +121,13 @@ export const authenticate = createMiddleware<HonoGenericContext>(async (c, next)
             argon2Config,
         );
         if (!passwordCorrect) {
-            return c.text("Incorrect password", 401);
+            const { isLocked: newLock, attemptsLeft } = await LoginAttemptManager.recordFailedAttempt(email);
+            if (newLock) {
+                return c.text("密碼錯誤次數過多，帳號已被鎖定5分鐘", 423);
+            }
+            return c.text(`密碼錯誤，剩餘嘗試次數：${attemptsLeft}`, 401);
         }
+        
         const payload: sessionUser = {
             id: worker.workerId,
             role: Role.WORKER,
@@ -110,6 +137,7 @@ export const authenticate = createMiddleware<HonoGenericContext>(async (c, next)
         session.set("role", payload.role);
         const realSessionId = session.getCache()._id;
         await SessionManager.track(payload.id, realSessionId);
+        await LoginAttemptManager.clearFailedAttempts(email);
         return next();
     }
     return c.text("Platform not supported", 401);

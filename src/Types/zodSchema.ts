@@ -100,6 +100,25 @@ export const updatePasswordSchema = z.object({
     .regex(/[0-9]/, "Must contain at least one number"),
 });
 
+/* password reset schemas */
+export const passwordResetRequestSchema = z.object({
+  email: z.email("Invalid email format"),
+});
+
+export const passwordResetVerifySchema = z.object({
+  email: z.email("Invalid email format"),
+  verificationCode: z
+    .string()
+    .length(6, "驗證碼必須是6位數字")
+    .regex(/^\d{6}$/, "驗證碼只能包含數字"),
+  newPassword: z
+    .string()
+    .min(8, "Password must be at least 8 characters")
+    .regex(/[A-Z]/, "Must contain at least one uppercase letter")
+    .regex(/[a-z]/, "Must contain at least one lowercase letter")
+    .regex(/[0-9]/, "Must contain at least one number"),
+});
+
 /* gig route schemas */
 const requirementsObjectSchema = z.object({
   skills: z.array(z.string()).min(1, "技能至少需要 1 筆"),

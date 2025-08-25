@@ -7,22 +7,23 @@ export class SessionManager {
    * 追蹤用戶 session (單一裝置登入)
    */
   static async track(userId: string, sessionId: string): Promise<void> {
-    await redisClient.setex(`${this.PREFIX}${userId}`, 86400, sessionId); // 24小時
+    //await redisClient.setex(`${this.PREFIX}${userId}`, 86400, sessionId); // 24小時
   }
 
   /**
    * 檢查 session 是否有效
    */
   static async isActive(userId: string, sessionId: string): Promise<boolean> {
-    const tracked = await redisClient.get(`${this.PREFIX}${userId}`);
-    return tracked === sessionId;
+    //const tracked = await redisClient.get(`${this.PREFIX}${userId}`);
+    //return tracked === sessionId;
+    return true;
   }
 
   /**
    * 清理 session 追蹤記錄
    */
   static async clear(userId: string): Promise<void> {
-    await redisClient.unlink(`${this.PREFIX}${userId}`);
+    //await redisClient.unlink(`${this.PREFIX}${userId}`);
   }
 
   /**

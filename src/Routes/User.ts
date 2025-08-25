@@ -8,6 +8,8 @@ import {
   updateWorkerProfileSchema,
   updateEmployerProfileSchema,
   updatePasswordSchema,
+  passwordResetRequestSchema,
+  passwordResetVerifySchema,
 } from "../Types/zodSchema";
 import { authenticate, authenticated, deserializeUser } from "../Middleware/authentication";
 import { uploadDocument, uploadProfilePhoto } from "../Middleware/fileUpload";
@@ -23,6 +25,9 @@ import NotificationHelper from "../Utils/NotificationHelper";
 import { requireEmployer } from "../Middleware/guards";
 import { sendEmail } from "../Client/EmailClient";
 import SessionManager from "../Utils/SessionManager";
+import { PasswordResetManager } from "../Utils/PasswordResetManager";
+import { EmailTemplates } from "../Utils/EmailTemplates";
+import { LoginAttemptManager } from "../Utils/LoginAttemptManager";
 
 const router = new Hono<HonoGenericContext>();
 
@@ -664,6 +669,88 @@ router.put("/update/profilePhoto", authenticated, uploadProfilePhoto, async (c) 
     } else if (user.role == Role.EMPLOYER) {
       await UserCache.clearUserProfile(user.employerId, Role.EMPLOYER);
     }
+  }
+});
+
+// Password Reset Request
+router.post("/pw-reset/request", zValidator("json", passwordResetRequestSchema), async (c) => {
+  try {
+    const { email } = c.req.valid("json");
+    const resetStatus = await PasswordResetManager.getResetStatus(email);
+
+    if (!resetStatus.canRequestNew) {
+      return c.text(`請等待 ${resetStatus.remainingCooldownTime} 秒後再重新請求`, 429);
+    }
+
+    const [worker, employer] = await Promise.all([
+      dbClient.query.workers.findFirst({ where: eq(workers.email, email) }),
+      dbClient.query.employers.findFirst({ where: eq(employers.email, email) })
+    ]);
+
+    const userExists = worker || employer;
+
+    if (userExists) {
+      const verificationCode = await PasswordResetManager.storeVerificationCode(email);
+      const subject = "密碼重設驗證碼";
+      const html = EmailTemplates.generatePasswordResetEmail(verificationCode, 30);
+      await sendEmail(email, subject, html);
+    } else {
+      await PasswordResetManager.setRequestCooldown(email);
+    }
+
+    return c.text("如果該郵箱地址存在於我們的系統中，您將會收到密碼重設驗證碼", 200);
+  } catch (error) {
+    console.error("Password reset request error:", error);
+    return c.text("處理密碼重設請求時發生錯誤", 500);
+  }
+});
+
+// Password Reset Verify and Update
+router.post("/pw-reset/verify", zValidator("json", passwordResetVerifySchema), async (c) => {
+  try {
+    const { email, verificationCode, newPassword } = c.req.valid("json");
+    const isValidCode = await PasswordResetManager.verifyCode(email, verificationCode);
+
+    if (!isValidCode) {
+      return c.text("驗證碼無效或已過期", 400);
+    }
+
+    const [worker, employer] = await Promise.all([
+      dbClient.query.workers.findFirst({ where: eq(workers.email, email) }),
+      dbClient.query.employers.findFirst({ where: eq(employers.email, email) })
+    ]);
+
+    const userExists = worker || employer;
+
+    if (!userExists) {
+      return c.text("用戶不存在", 404);
+    }
+
+    const hashedPassword = await argon2hash(newPassword, argon2Config);
+
+    if (worker) {
+      await dbClient
+        .update(workers)
+        .set({ password: hashedPassword, updatedAt: sql`now()` })
+        .where(eq(workers.workerId, worker.workerId));
+      await UserCache.clearUserProfile(worker.workerId, Role.WORKER);
+    } else if (employer) {
+      await dbClient
+        .update(employers)
+        .set({ password: hashedPassword, updatedAt: sql`now()` })
+        .where(eq(employers.employerId, employer.employerId));
+      await UserCache.clearUserProfile(employer.employerId, Role.EMPLOYER);
+    }
+
+    const subject = "密碼重設成功通知";
+    const html = EmailTemplates.generatePasswordResetSuccessEmail();
+    await sendEmail(email, subject, html);
+    await PasswordResetManager.deleteVerificationCode(email);
+    await LoginAttemptManager.clearFailedAttempts(email);
+    return c.text("密碼重設成功", 200);
+  } catch (error) {
+    console.error("Password reset verify error:", error);
+    return c.text("處理密碼重設時發生錯誤", 500);
   }
 });
 

@@ -22,6 +22,7 @@ import { UserCache, FileManager, RatingCache, s3Client } from "../Client/Cache/I
 import NotificationHelper from "../Utils/NotificationHelper";
 import { requireEmployer } from "../Middleware/guards";
 import { sendEmail } from "../Client/EmailClient";
+import SessionManager from "../Utils/SessionManager";
 
 const router = new Hono<HonoGenericContext>();
 
@@ -235,20 +236,19 @@ router.post("/login", zValidator("json", loginSchema), authenticate, async (c) =
 
 router.get("/logout", async (c) => {
   const session = c.get("session");
-
-  // 檢查是否已經登出
-  if (!session || !session.get("id")) {
-    return c.text("已經登出或沒有活動會話", 400);
-  }
-
-  // 獲取用戶信息用於清除快取
   const userId = session.get("id");
   const role = session.get("role");
 
-  // 清除用戶快取
-  if (userId && role) {
-    await UserCache.clearUserProfile(userId, role);
+  // 檢查是否已經登出
+  if (!userId) {
+    return c.text("已經登出或沒有活動會話", 400);
   }
+
+  // 清除用戶快取
+  await UserCache.clearUserProfile(userId, role);
+
+  // 清除 session 追蹤記錄
+  await SessionManager.clear(userId);
 
   // 刪除會話
   session.deleteSession();

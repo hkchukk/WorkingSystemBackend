@@ -7,10 +7,13 @@ import { loginSchema } from "../Types/zodSchema"
 import { verify } from "@node-rs/argon2"
 import { argon2Config } from "../config"
 import type { Session } from "hono-sessions"
-import { UserCache } from "../Client/Cache/Index";
+import { UserCache } from "../Client/Cache/Index"
+import SessionManager from "../Utils/SessionManager";
 
 export const authenticate = createMiddleware<HonoGenericContext>(async (c, next) => {
-    if (c.get("session").get("id")) {
+    const session = c.get("session");
+
+    if (session.get("id")) {
         return c.text("已經登入", 401);
     }
 
@@ -48,8 +51,11 @@ export const authenticate = createMiddleware<HonoGenericContext>(async (c, next)
             id: employer.employerId,
             role: Role.EMPLOYER,
         };
-        c.get("session").set("id", payload.id);
-        c.get("session").set("role", payload.role);
+        
+        session.set("id", payload.id);
+        session.set("role", payload.role);
+        const realSessionId = session.getCache()._id;
+        await SessionManager.track(payload.id, realSessionId);
         return next();
     }
 
@@ -72,8 +78,11 @@ export const authenticate = createMiddleware<HonoGenericContext>(async (c, next)
             id: admin.adminId,
             role: Role.ADMIN,
         };
-        c.get("session").set("id", payload.id);
-        c.get("session").set("role", payload.role);
+        
+        session.set("id", payload.id);
+        session.set("role", payload.role);
+        const realSessionId = session.getCache()._id;
+        await SessionManager.track(payload.id, realSessionId);
         return next();
     }
 
@@ -96,8 +105,11 @@ export const authenticate = createMiddleware<HonoGenericContext>(async (c, next)
             id: worker.workerId,
             role: Role.WORKER,
         };
-        c.get("session").set("id", payload.id);
-        c.get("session").set("role", payload.role);
+        
+        session.set("id", payload.id);
+        session.set("role", payload.role);
+        const realSessionId = session.getCache()._id;
+        await SessionManager.track(payload.id, realSessionId);
         return next();
     }
     return c.text("Platform not supported", 401);
@@ -105,13 +117,27 @@ export const authenticate = createMiddleware<HonoGenericContext>(async (c, next)
 
 export const authenticated = createMiddleware<HonoGenericContext>(async (c, next) => {
     const session = c.get("session");
-    if (!session.get("id")) {
+    const userId = session.get("id");
+    
+    if (!userId) {
         return c.text("Unauthorized", 401);
     }
+    
+    // 檢查用戶是否被踢下線
+    const sessionId = session.getCache()._id;
+    const isActive = await SessionManager.isActive(userId, sessionId);
+
+    if (!isActive) {
+        session.deleteSession();
+        return c.text("被踢下線", 401);
+    }
+    
     const user = await deserializeUser(session);
+
     if (!user) {
         return c.text("Unauthorized", 401);
     }
+    
     c.set("user", user);
     return next();
 })

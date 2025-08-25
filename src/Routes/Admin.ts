@@ -11,8 +11,9 @@ import { adminRegisterSchema } from "../Types/zodSchema";
 import { hash } from "@node-rs/argon2";
 import { argon2Config } from "../config";
 import NotificationHelper from "../Utils/NotificationHelper";
-import { UserCache } from "../Client/Cache/index";
+import { UserCache } from "../Client/Cache/Index";
 import { Role } from "../Types/types";
+import SessionManager from "../Utils/SessionManager";
 
 const router = new Hono<HonoGenericContext>();
 
@@ -64,5 +65,33 @@ router.patch(
 		return c.json(updatedEmployer[0]);
 	},
 );
+
+// 踢用戶下線
+router.post("/kick-user/:userId", authenticated, async (c) => {
+	const userId = c.req.param("userId");
+
+	try {
+		await SessionManager.clear(userId);
+		return c.json({ message: `用戶 ${userId} 已被踢下線` });
+	} catch (error) {
+		console.error("踢用戶下線失敗:", error);
+		return c.text("踢用戶下線失敗", 500);
+	}
+});
+
+// 獲取所有活躍 sessions
+router.get("/active-sessions", authenticated, async (c) => {
+	try {
+		const activeSessions = await SessionManager.getAll();
+		return c.json({
+			message: "活躍 sessions 獲取成功",
+			sessions: activeSessions,
+			count: activeSessions.length
+		});
+	} catch (error) {
+		console.error("獲取活躍 sessions 失敗:", error);
+		return c.text("獲取活躍 sessions 失敗", 500);
+	}
+});
 
 export default { path: "/admin", router } as IRouter;

@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
-import { sessionMiddleware, CookieStore } from "hono-sessions";
+import { sessionMiddleware } from "hono-sessions";
+import { RedisStoreAdapter } from "./Client/RedisSessionStore";
 import type { HonoGenericContext } from "./Types/types";
 import { argon2Config } from "./config";
 import { hash } from "@node-rs/argon2";
@@ -11,7 +12,12 @@ import redisClient from "./Client/RedisClient";
 import { sendEmail } from "./Client/EmailClient";
 
 const app = new Hono<HonoGenericContext>();
-const store = new CookieStore();
+
+const store = new RedisStoreAdapter({
+  prefix: "hono-session:",
+  ttl: 60 * 60 * 24, // 24 小時
+  client: redisClient,
+});
 
 app.use("*", cors({ origin: "*", credentials: true }));
 

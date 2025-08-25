@@ -382,6 +382,18 @@ router.get("/public/:gigId", async (c) => {
       return c.json({ message: "工作不存在或目前無法查看" }, 404);
     }
 
+    if (gig.employer.employerPhoto && typeof gig.employer.employerPhoto === 'object' && 'r2Name' in gig.employer.employerPhoto) {
+      const photo = gig.employer.employerPhoto as any;
+      const url = await FileManager.getPresignedUrl(`profile-photos/employers/${photo.r2Name}`);
+      if (url) {
+        gig.employer.employerPhoto = {
+          url: url,
+          originalName: photo.originalName,
+          type: photo.type,
+        };
+      }
+    }
+
     const formattedGig = {
       ...gig,
       environmentPhotos: await formatEnvironmentPhotos(gig.environmentPhotos),

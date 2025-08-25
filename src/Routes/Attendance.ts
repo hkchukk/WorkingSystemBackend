@@ -152,7 +152,7 @@ router.post(
           status = "on_time";
         }
       } else {
-        // 下班打卡：最早可在工作結束時間打卡，最遲延後 30 分鐘
+        // 下班打卡：最遲延後 30 分鐘
         const latestAllowed = todayTimeEnd.clone().add(30, 'minutes');
         
         if (now.isBefore(todayTimeEnd)) {
@@ -369,6 +369,7 @@ router.put(
   requireApprovedEmployer,
   zValidator("json", updateAttendanceRecordSchema),
   async (c) => {
+    const user = c.get("user");
     const { recordId, status, notes } = c.req.valid("json");
 
     try {
@@ -379,7 +380,11 @@ router.put(
           notes: attendanceRecords.notes,
         })
         .from(attendanceRecords)
-        .where(eq(attendanceRecords.recordId, recordId))
+        .innerJoin(gigs, eq(attendanceRecords.gigId, gigs.gigId))
+        .where(and(
+          eq(attendanceRecords.recordId, recordId),
+          eq(gigs.employerId, user.employerId)
+        ))
         .limit(1);
 
       if (record.length === 0) {

@@ -28,6 +28,7 @@ import SessionManager from "../Utils/SessionManager";
 import { PasswordResetManager } from "../Utils/PasswordResetManager";
 import { EmailTemplates } from "../Utils/EmailTemplates";
 import { LoginAttemptManager } from "../Utils/LoginAttemptManager";
+import { getConnInfo } from 'hono/bun'
 
 const router = new Hono<HonoGenericContext>();
 
@@ -727,26 +728,36 @@ router.post("/pw-reset/verify", zValidator("json", passwordResetVerifySchema), a
     }
 
     const hashedPassword = await argon2hash(newPassword, argon2Config);
+    let platform: string;
 
+    
     if (worker) {
       await dbClient
         .update(workers)
         .set({ password: hashedPassword, updatedAt: sql`now()` })
         .where(eq(workers.workerId, worker.workerId));
+
+      platform = "mobile"
       await UserCache.clearUserProfile(worker.workerId, Role.WORKER);
     } else if (employer) {
       await dbClient
         .update(employers)
         .set({ password: hashedPassword, updatedAt: sql`now()` })
         .where(eq(employers.employerId, employer.employerId));
+
+      platform = "web-employer"
       await UserCache.clearUserProfile(employer.employerId, Role.EMPLOYER);
     }
+
+    const info = getConnInfo(c)
+    const clientIP = info.remote.address
+    console.log(clientIP);
 
     const subject = "密碼重設成功通知";
     const html = EmailTemplates.generatePasswordResetSuccessEmail();
     await sendEmail(email, subject, html);
     await PasswordResetManager.deleteVerificationCode(email);
-    await LoginAttemptManager.clearFailedAttempts(email);
+    await LoginAttemptManager.clearFailedAttempts(platform, email, clientIP);
     return c.text("密碼重設成功", 200);
   } catch (error) {
     console.error("Password reset verify error:", error);

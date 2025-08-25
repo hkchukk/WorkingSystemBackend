@@ -5,11 +5,19 @@ export class LoginAttemptManager {
   private static readonly LOCKOUT_DURATION = 5 * 60; // 5 分鐘（秒）
 
   /**
+   * 生成鎖定鍵值
+   */
+  private static generateKey(platform: string, email: string, ip: string, type: 'attempts' | 'locked'): string {
+    return `login_${type}:${platform}:${email}:${ip}`;
+  }
+
+  /**
    * 獲取用戶登錄失敗次數
    */
-  static async getFailedAttempts(email: string): Promise<number> {
+  static async getFailedAttempts(platform: string, email: string, ip: string): Promise<number> {
     try {
-      const attempts = await redisClient.get(`login_attempts:${email}`);
+      const key = this.generateKey(platform, email, ip, 'attempts');
+      const attempts = await redisClient.get(key);
       return attempts ? parseInt(attempts) : 0;
     } catch (error) {
       console.error("Failed to get login attempts:", error);
@@ -20,16 +28,17 @@ export class LoginAttemptManager {
   /**
    * 記錄登錄失敗
    */
-  static async recordFailedAttempt(email: string): Promise<{ isLocked: boolean; attemptsLeft: number }> {
+  static async recordFailedAttempt(platform: string, email: string, ip: string): Promise<{ isLocked: boolean; attemptsLeft: number }> {
     try {
-      const currentAttempts = await this.getFailedAttempts(email);
+      const currentAttempts = await this.getFailedAttempts(platform, email, ip);
       const newAttempts = currentAttempts + 1;
-
       const pipeline = redisClient.pipeline();
-      pipeline.setex(`login_attempts:${email}`, this.LOCKOUT_DURATION, newAttempts.toString());
+      const attemptsKey = this.generateKey(platform, email, ip, 'attempts');
+      pipeline.setex(attemptsKey, this.LOCKOUT_DURATION, newAttempts.toString());
 
       if (newAttempts >= this.MAX_ATTEMPTS) {
-        pipeline.setex(`login_locked:${email}`, this.LOCKOUT_DURATION, "1");
+        const lockedKey = this.generateKey(platform, email, ip, 'locked');
+        pipeline.setex(lockedKey, this.LOCKOUT_DURATION, "1");
       }
 
       await pipeline.exec();
@@ -48,11 +57,13 @@ export class LoginAttemptManager {
   /**
    * 清除登錄失敗記錄
    */
-  static async clearFailedAttempts(email: string): Promise<void> {
+  static async clearFailedAttempts(platform: string, email: string, ip: string): Promise<void> {
     try {
       const pipeline = redisClient.pipeline();
-      pipeline.unlink(`login_attempts:${email}`);
-      pipeline.unlink(`login_locked:${email}`);
+      const attemptsKey = this.generateKey(platform, email, ip, 'attempts');
+      const lockedKey = this.generateKey(platform, email, ip, 'locked');
+      pipeline.unlink(attemptsKey);
+      pipeline.unlink(lockedKey);
       await pipeline.exec();
     } catch (error) {
       console.error("Failed to clear failed attempts:", error);
@@ -62,17 +73,20 @@ export class LoginAttemptManager {
   /**
    * 獲取用戶登錄狀態
    */
-  static async getLoginStatus(email: string): Promise<{
+  static async getLoginStatus(platform: string, email: string, ip: string): Promise<{
     isLocked: boolean;
     failedAttempts: number;
     attemptsLeft: number;
     remainingLockTime: number;
   }> {
     try {
+      const attemptsKey = this.generateKey(platform, email, ip, 'attempts');
+      const lockedKey = this.generateKey(platform, email, ip, 'locked');
+
       const pipeline = redisClient.pipeline();
-      pipeline.exists(`login_locked:${email}`);
-      pipeline.get(`login_attempts:${email}`);
-      pipeline.ttl(`login_locked:${email}`);
+      pipeline.exists(lockedKey);
+      pipeline.get(attemptsKey);
+      pipeline.ttl(lockedKey);
 
       const results = await pipeline.exec();
       

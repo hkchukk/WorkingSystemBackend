@@ -10,6 +10,7 @@ import type { Session } from "hono-sessions"
 import { UserCache } from "../Client/Cache/Index"
 import SessionManager from "../Utils/SessionManager"
 import { LoginAttemptManager } from "../Utils/LoginAttemptManager";
+import { getConnInfo } from 'hono/bun'
 
 export const authenticate = createMiddleware<HonoGenericContext>(async (c, next) => {
     const session = c.get("session");
@@ -34,8 +35,11 @@ export const authenticate = createMiddleware<HonoGenericContext>(async (c, next)
 
     const { email, password } = user;
     
-    // 檢查用戶登錄狀態
-    const loginStatus = await LoginAttemptManager.getLoginStatus(email);
+    const info = getConnInfo(c)
+    const clientIP = info.remote.address
+    console.log(clientIP);
+
+    const loginStatus = await LoginAttemptManager.getLoginStatus(platform, email, clientIP);
 
     if (loginStatus.isLocked) {
         const minutes = Math.ceil(loginStatus.remainingLockTime / 60);
@@ -47,7 +51,7 @@ export const authenticate = createMiddleware<HonoGenericContext>(async (c, next)
             where: eq(employers.email, email),
         });
         if (!employer) {
-            return c.text("No employer found", 401);
+            return c.text("找不到用戶", 401);
         }
         const passwordCorrect = await verify(
             employer.password,
@@ -55,7 +59,7 @@ export const authenticate = createMiddleware<HonoGenericContext>(async (c, next)
             argon2Config,
         );
         if (!passwordCorrect) {
-            const { isLocked: newLock, attemptsLeft } = await LoginAttemptManager.recordFailedAttempt(email);
+            const { isLocked: newLock, attemptsLeft } = await LoginAttemptManager.recordFailedAttempt(platform, email, clientIP);
             if (newLock) {
                 return c.text("密碼錯誤次數過多，帳號已被鎖定 5 分鐘", 423);
             }
@@ -71,7 +75,7 @@ export const authenticate = createMiddleware<HonoGenericContext>(async (c, next)
         session.set("role", payload.role);
         const realSessionId = session.getCache()._id;
         await SessionManager.track(payload.id, realSessionId);
-        await LoginAttemptManager.clearFailedAttempts(email);
+        await LoginAttemptManager.clearFailedAttempts(platform, email, clientIP);
         return next();
     }
 
@@ -80,7 +84,7 @@ export const authenticate = createMiddleware<HonoGenericContext>(async (c, next)
             where: eq(admins.email, email),
         });
         if (!admin) {
-            return c.text("No admin found", 401);
+            return c.text("找不到用戶", 401);
         }
         const passwordCorrect = await verify(
             admin.password,
@@ -88,7 +92,7 @@ export const authenticate = createMiddleware<HonoGenericContext>(async (c, next)
             argon2Config,
         );
         if (!passwordCorrect) {
-            const { isLocked: newLock, attemptsLeft } = await LoginAttemptManager.recordFailedAttempt(email);
+            const { isLocked: newLock, attemptsLeft } = await LoginAttemptManager.recordFailedAttempt(platform, email, clientIP);
             if (newLock) {
                 return c.text("密碼錯誤次數過多，帳號已被鎖定 5 分鐘", 423);
             }
@@ -104,7 +108,7 @@ export const authenticate = createMiddleware<HonoGenericContext>(async (c, next)
         session.set("role", payload.role);
         const realSessionId = session.getCache()._id;
         await SessionManager.track(payload.id, realSessionId);
-        await LoginAttemptManager.clearFailedAttempts(email);
+        await LoginAttemptManager.clearFailedAttempts(platform, email, clientIP);
         return next();
     }
 
@@ -113,7 +117,7 @@ export const authenticate = createMiddleware<HonoGenericContext>(async (c, next)
             where: eq(workers.email, email),
         });
         if (!worker) {
-            return c.text("No worker found", 401);
+            return c.text("找不到用戶", 401);
         }
         const passwordCorrect = await verify(
             worker.password,
@@ -121,13 +125,13 @@ export const authenticate = createMiddleware<HonoGenericContext>(async (c, next)
             argon2Config,
         );
         if (!passwordCorrect) {
-            const { isLocked: newLock, attemptsLeft } = await LoginAttemptManager.recordFailedAttempt(email);
+            const { isLocked: newLock, attemptsLeft } = await LoginAttemptManager.recordFailedAttempt(platform, email, clientIP);
             if (newLock) {
-                return c.text("密碼錯誤次數過多，帳號已被鎖定5分鐘", 423);
+                return c.text("密碼錯誤次數過多，帳號已被鎖定 5 分鐘", 423);
             }
             return c.text(`密碼錯誤，剩餘嘗試次數：${attemptsLeft}`, 401);
         }
-        
+
         const payload: sessionUser = {
             id: worker.workerId,
             role: Role.WORKER,
@@ -137,7 +141,7 @@ export const authenticate = createMiddleware<HonoGenericContext>(async (c, next)
         session.set("role", payload.role);
         const realSessionId = session.getCache()._id;
         await SessionManager.track(payload.id, realSessionId);
-        await LoginAttemptManager.clearFailedAttempts(email);
+        await LoginAttemptManager.clearFailedAttempts(platform, email, clientIP);
         return next();
     }
     return c.text("Platform not supported", 401);

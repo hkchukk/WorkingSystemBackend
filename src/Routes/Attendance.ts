@@ -221,11 +221,34 @@ router.get(
           lte(gigs.dateStart, today),
           gte(gigs.dateEnd, today)
         ));
+
+      // 查詢今天的打卡記錄
+      const todayAttendance = await dbClient.query.attendanceRecords.findMany({
+        where: and(
+          eq(attendanceRecords.workerId, user.workerId),
+          eq(attendanceRecords.workDate, today)
+        ),
+        columns: {
+          gigId: true,
+          checkType: true
+        }
+      });
+
+      // 簽到和簽退狀態
+      const jobsWithCheckStatus = todayJobs.map(job => ({
+        ...job,
+        checkedIn: todayAttendance.some(record => 
+          record.gigId === job.gigId && record.checkType === "check_in"
+        ),
+        checkedOut: todayAttendance.some(record => 
+          record.gigId === job.gigId && record.checkType === "check_out"
+        )
+      }));
       
       return c.json({
         date: today,
-        jobs: todayJobs,
-        total: todayJobs.length
+        jobs: jobsWithCheckStatus,
+        total: jobsWithCheckStatus.length
       });
 
     } catch (error) {

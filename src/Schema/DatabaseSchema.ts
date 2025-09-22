@@ -44,6 +44,9 @@ export const workers = pgTable("workers", {
 
   jobExperience: json("job_experience").default([]),
 
+  // === FCM 推播通知相關欄位 ===
+  fcmTokens: json("fcm_tokens").default([]), // 存儲多個 FCM tokens
+
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
@@ -97,6 +100,9 @@ export const employers = pgTable("employers", {
 
   // 5) 商家大頭照
   employerPhoto: json("employer_photo"),
+
+  // === FCM 推播通知相關欄位 ===
+  fcmTokens: json("fcm_tokens").default([]), // 存儲多個 FCM tokens
   
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
@@ -109,6 +115,9 @@ export const admins = pgTable("admins", {
 
   email: text("email").notNull().unique(),
   password: text("password").notNull(),
+
+  // === FCM 推播通知相關欄位 ===
+  fcmTokens: json("fcm_tokens").default([]), // 存儲多個 FCM tokens
 });
 
 // ========== 3. 工作表（Gigs） ==========

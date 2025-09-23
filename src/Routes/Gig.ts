@@ -118,7 +118,7 @@ async function formatEnvironmentPhotos(environmentPhotos: any, limit?: number) {
           return {
             url: null,
             error: "照片資料不完整",
-            originalName: photo?.originalName || '未知檔案',
+            originalName: "********",
             type: photo?.type || 'unknown'
           };
         }
@@ -130,16 +130,16 @@ async function formatEnvironmentPhotos(environmentPhotos: any, limit?: number) {
           return {
             url: null,
             error: "圖片連結生成失敗",
-            originalName: photo.originalName,
+            originalName: "********",
             type: photo.type,
-            filename: photo.filename
+            filename: "********"
           };
         } else {
           return {
             url: presignedUrl,
-            originalName: photo.originalName,
+            originalName: "********",
             type: photo.type,
-            filename: photo.filename
+            filename: "********"
           };
         }
       })
@@ -912,6 +912,7 @@ router.get("/employer/calendar", authenticated, requireEmployer, requireApproved
         dateEnd: true,
         timeStart: true,
         timeEnd: true,
+        environmentPhotos: true,
       },
       limit: requestLimit + 1, // 多查一筆來判斷 hasMore
       offset: requestOffset,
@@ -921,9 +922,17 @@ router.get("/employer/calendar", authenticated, requireEmployer, requireApproved
     const hasMore = calendarGigs.length > requestLimit;
     const actualCalendarGigs = hasMore ? calendarGigs.slice(0, requestLimit) : calendarGigs;
 
+    // 為每個工作處理環境照片，只取 1 張
+    const gigsWithPhotos = await Promise.all(
+      actualCalendarGigs.map(async (gig) => ({
+        ...gig,
+        environmentPhotos: await formatEnvironmentPhotos(gig.environmentPhotos, 1),
+      }))
+    );
+
     return c.json(
       {
-        gigs: calendarGigs,
+        gigs: gigsWithPhotos,
         queryInfo: {
           year: year || null,
           month: month || null,
@@ -934,7 +943,7 @@ router.get("/employer/calendar", authenticated, requireEmployer, requireApproved
           limit: requestLimit,
           offset: requestOffset,
           hasMore: hasMore,
-          returned: actualCalendarGigs.length,
+          returned: gigsWithPhotos.length,
         },
       },
       200

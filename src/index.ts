@@ -7,7 +7,6 @@ import { argon2Config } from "./config";
 import { hash } from "@node-rs/argon2";
 import { Glob } from "bun";
 import type IRouter from "./Interfaces/IRouter";
-import CronManager from "./Utils/CronManager";
 import redisClient from "./Client/RedisClient";
 import { sendEmail } from "./Client/EmailClient";
 
@@ -73,6 +72,7 @@ async function initializeSystem() {
     console.error("❌ Redis 快取連接失敗:", error);
   }
 
+  /*
   // 初始化 Cron 任務
   try {
     const cronInitialized = await CronManager.initializeCronJobs();
@@ -83,6 +83,7 @@ async function initializeSystem() {
   } catch (error) {
     console.error("❌ Cron 任務初始化過程中發生錯誤:", error);
   }
+  */
 }
 
 // 在應用啟動時初始化系統

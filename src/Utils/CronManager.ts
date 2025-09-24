@@ -56,10 +56,10 @@ export class CronManager {
   }
 
   /**
-   * 創建自動下架工作的 cron 任務
+   * 創建定期清理任務的 cron 任務
    */
   static async createAutoUnlistJob(): Promise<boolean> {
-    const jobName = "auto_unlist_expired_gigs";
+    const jobName = "auto_cleanup_expired_gigs";
 
     try {
       // 檢查任務是否已存在
@@ -71,21 +71,13 @@ export class CronManager {
       // Cron 表達式: 每天 15:00 UTC (等於台北時間 23:00)
       const schedule = "0 15 * * *";
 
-      // SQL 查詢：批量更新過期工作的狀態
+      // SQL 查詢
       const command = `
         DO $$
         DECLARE
           taipei_today DATE := (NOW() AT TIME ZONE 'Asia/Taipei')::DATE;
         BEGIN
-          -- 批量更新工作狀態
-          UPDATE gigs 
-          SET 
-            "unlisted_at" = taipei_today,
-            "is_active" = false,
-            "updated_at" = NOW()
-          WHERE 
-            "date_end" = taipei_today
-            AND "is_active" = true;
+          NULL;
         END;
         $$;
       `;
@@ -98,9 +90,9 @@ export class CronManager {
         );
       `);
 
-      console.log(`✅ 已創建自動下架工作的 cron 任務: ${jobName}`);
+      console.log(`✅ 已創建定期清理任務的 cron 任務: ${jobName}`);
       console.log(`📅 執行時間: 每天台北時間 23:00 (UTC 15:00)`);
-      console.log("🎯 功能: 批量處理過期工作");
+      console.log("🎯 功能: 定期清理和維護工作資料");
       return true;
     } catch (error) {
       console.error(`❌ 創建 cron 任務 ${jobName} 失敗:`, error);
@@ -148,10 +140,10 @@ export class CronManager {
       }
     }
 
-    // 2. 創建自動下架任務
+    // 2. 創建定期清理任務
     const autoUnlistCreated = await CronManager.createAutoUnlistJob();
     if (!autoUnlistCreated) {
-      console.error("❌ 自動下架任務創建失敗");
+      console.error("❌ 定期清理任務創建失敗");
       return false;
     }
 

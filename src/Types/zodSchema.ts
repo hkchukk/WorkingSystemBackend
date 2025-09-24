@@ -183,7 +183,7 @@ export const createGigSchema = z.object({
   contactPerson: z.string().min(1, "聯絡人不能為空").max(32, "聯絡人姓名過長"),
   contactPhone: z.string().regex(/^(09\d{8}|\+8869\d{8}|0\d{1,2}-?\d{6,8})$/, "聯絡電話格式不正確").optional(),
   contactEmail: z.email("聯絡人 Email 格式不正確").max(128, "Email 過長").optional(),
-  publishedAt: z.coerce.date().refine((date) => {
+  publishedAt: z.coerce.date().default(() => new Date()).refine((date) => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     return date >= today;
@@ -298,7 +298,7 @@ export const updateGigSchema = z.object({
   contactPerson: z.string().min(1, "聯絡人不能為空").max(32, "聯絡人姓名過長").optional(),
   contactPhone: z.string().regex(/^(09\d{8}|\+8869\d{8}|0\d{1,2}-?\d{6,8})$/, "聯絡電話格式不正確").optional(),
   contactEmail: z.email("聯絡人 Email 格式不正確").max(128, "Email 過長").optional(),
-  publishedAt: z.coerce.date().optional().refine((date) => {
+  publishedAt: z.coerce.date().optional().default(() => new Date()).refine((date) => {
     if (!date) return true; // 可選字段，沒值就通過
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -487,4 +487,18 @@ export const updateAttendanceRecordSchema = z.object({
   recordId: z.string().min(1, "記錄ID不能為空"),
   status: z.enum(["on_time", "late", "early"]),
   notes: z.string().min(1, "備註不能為空").max(500, "備註不能超過500字"),
+});
+
+/* FCM token schemas */
+export const registerFCMTokenSchema = z.object({
+  token: z.string().min(1, "FCM token 不能為空"),
+  deviceType: z.enum(["android", "ios", "web"], {
+    message: "設備類型必須是 android、ios 或 web",
+  }).optional(),
+});
+
+export const sendTestPushSchema = z.object({
+  title: z.string().min(1, "標題不能為空").max(256, "標題過長"),
+  message: z.string().min(1, "訊息不能為空"),
+  data: z.record(z.string(), z.string()).optional(),
 });

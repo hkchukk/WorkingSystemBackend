@@ -676,7 +676,7 @@ router.put(
     try {
       const gigId = c.req.param("gigId");
 
-      // 處理照片上傳（如果有新照片上傳）
+      // 檢查工作是否存在
       const existingGig = await dbClient.query.gigs.findFirst({
         where: and(eq(gigs.gigId, gigId), eq(gigs.employerId, user.employerId)),
       });
@@ -697,17 +697,7 @@ router.put(
         return c.text("工作已關閉，無法更新", 400);
       }
 
-      // 檢查是否有申請中或已核准的申請
-      const activeApplications = await dbClient.query.gigApplications.findFirst({
-        where: and(eq(gigApplications.gigId, gigId), or(eq(gigApplications.status, "pending"), eq(gigApplications.status, "approved"))),
-        columns: { applicationId: true },
-      });
-
-      if (activeApplications) {
-        return c.text("此工作有申請中或已核准的申請者，無法更新", 400);
-      }
-
-      // 使用原始的照片資料，而不是格式化後的資料
+      // 處理照片上傳
       const existingPhotos = Array.isArray(existingGig.environmentPhotos) ? existingGig.environmentPhotos : [];
       const { environmentPhotosInfo, uploadedFiles: filesList, addedCount, totalCount, message } = await handlePhotoUpload(reqFile, existingPhotos);
       uploadedFiles = filesList;

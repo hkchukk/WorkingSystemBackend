@@ -1,6 +1,7 @@
 import * as z from "zod";
 import { isValidCity, isValidDistrict } from "../Utils/AreaData";
 import moment from "moment";
+import { Role } from "./types";
 
 export const loginSchema = z.object({
   email: z.email("Invalid email format"),
@@ -425,10 +426,12 @@ const notificationTypeEnum = z.enum(["application", "rating", "account", "system
 
 export const createNotificationSchema = z.object({
   receiverId: z.string().min(1, "接收者ID不能為空"),
+  userRole: z.enum(Role),
   title: z.string().min(1, "標題不能為空").max(256, "標題過長"),
   message: z.string().min(1, "訊息不能為空"),
   type: notificationTypeEnum,
   resourceId: z.string().min(1).optional(),
+  sendPush: z.boolean().default(false),
 });
 
 export const markAsReadSchema = z.object({
@@ -455,6 +458,7 @@ export const createGroupNotificationSchema = z.object({
   message: z.string().min(1, "訊息不能為空"),
   type: notificationTypeEnum,
   resourceId: z.string().min(1).optional(),
+  sendPush: z.boolean().default(false),
 });
 
 /* attendance system schemas */
@@ -495,7 +499,7 @@ export const registerFCMTokenSchema = z.object({
   token: z.string().min(1, "FCM token 不能為空"),
   deviceType: z.enum(["android", "ios", "web"], {
     message: "設備類型必須是 android、ios 或 web",
-  }).optional(),
+  }),
 });
 
 export const sendTestPushSchema = z.object({

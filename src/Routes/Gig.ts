@@ -434,6 +434,8 @@ router.get("/public/:gigId", async (c) => {
 router.post(
   "/create",
   authenticated,
+  requireEmployer,
+  requireApprovedEmployer,
   uploadEnvironmentPhotos,
   zValidator("form", createGigSchema),
   async (c) => {

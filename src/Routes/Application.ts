@@ -18,6 +18,7 @@ import { zValidator } from "@hono/zod-validator";
 import { reviewApplicationSchema } from "../Types/zodSchema";
 import moment from "moment";
 import NotificationHelper from "../Utils/NotificationHelper";
+import { Role } from "../Types/types";
 
 const router = new Hono<HonoGenericContext>();
 
@@ -82,6 +83,7 @@ router.post(
       // 發送通知給商家
       await NotificationHelper.notifyApplicationReceived(
         gig.employerId,
+        Role.EMPLOYER,
         `${user.firstName} ${user.lastName}`,
         gig.title,
         gig.gigId,
@@ -651,6 +653,7 @@ router.put(
       if (status === "approved") {
         await NotificationHelper.notifyApplicationApproved(
           application.workerId,
+          Role.WORKER,
           application.gig.title,
           user.employerName,
           application.gig.gigId,
@@ -658,6 +661,7 @@ router.put(
       } else if (status === "rejected") {
         await NotificationHelper.notifyApplicationRejected(
           application.workerId,
+          Role.WORKER,
           application.gig.title,
           user.employerName,
           application.gig.gigId,

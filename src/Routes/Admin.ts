@@ -58,6 +58,7 @@ router.patch(
 		// 發送審核通過通知
 		await NotificationHelper.notifyAccountApproved(
 			employerFound.employerId,
+			Role.EMPLOYER,
 			employerFound.employerName
 		);
 

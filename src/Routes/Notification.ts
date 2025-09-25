@@ -8,6 +8,7 @@ import { notifications } from "../Schema/DatabaseSchema";
 import { zValidator } from "@hono/zod-validator";
 import { createNotificationSchema, markAsReadSchema, createBatchNotificationSchema, createGroupNotificationSchema } from "../Types/zodSchema";
 import NotificationHelper from "../Utils/NotificationHelper";
+import { Role } from "../Types/types";
 
 const router = new Hono<HonoGenericContext>();
 
@@ -145,8 +146,10 @@ router.put("/mark-as-read", authenticated, zValidator("json", markAsReadSchema),
 
 // 建立通知 (管理員或系統內部使用)
 router.post("/create", authenticated, zValidator("json", createNotificationSchema), async (c) => {
-    const body = c.req.valid("json");
+  const body = c.req.valid("json");
+  
   try {
+    // 建立通知記錄
     const newNotification = await dbClient
       .insert(notifications)
       .values({
@@ -157,6 +160,24 @@ router.post("/create", authenticated, zValidator("json", createNotificationSchem
         resourceId: body.resourceId || null,
       })
       .returning();
+
+    // 如果需要發送推播通知
+    if (body.sendPush) {
+      const pushSuccess = await NotificationHelper.sendPushNotification(
+        body.receiverId,
+        body.userRole as Role,
+        body.title,
+        body.message,
+        {
+          type: body.type,
+          resourceId: body.resourceId || "",
+        }
+      );
+      
+      if (!pushSuccess) {
+        console.warn(`推播通知發送失敗，用戶ID: ${body.receiverId}`);
+      }
+    }
 
     return c.json({
       message: "通知建立成功",
@@ -201,18 +222,37 @@ router.post("/create-batch", authenticated, zValidator("json", createBatchNotifi
 // 發送通知給指定用戶群組 (管理員或系統內部使用)
 router.post("/create-group", authenticated, zValidator("json", createGroupNotificationSchema), async (c) => {
   try {
-    const { groups, title, message, type, resourceId } = c.req.valid("json");
+    const { groups, title, message, type, resourceId, sendPush } = c.req.valid("json");
 
+    // 建立通知記錄
     const success = await NotificationHelper.notifyUserGroups(groups, title, message, type, resourceId);
 
-    if (success) {
+    if (!success) {
       return c.json({
-        message: "群組通知發送成功",
-      }, 201);
+        message: "群組通知發送失敗",
+      }, 500);
     }
+
+    if (sendPush) {
+      const pushData = {
+        type,
+        resourceId: resourceId || "",
+      };
+
+      const targetRoles: Role[] = [];
+      groups.workers && targetRoles.push(Role.WORKER);
+      groups.employers && targetRoles.push(Role.EMPLOYER);
+      groups.admins && targetRoles.push(Role.ADMIN);
+
+      if (targetRoles.length > 0) {
+        await NotificationHelper.sendPushToUserGroup(targetRoles, title, message, pushData);
+      }
+    }
+
     return c.json({
-      message: "群組通知發送失敗",
-    }, 500);
+      message: "群組通知發送成功",
+    }, 201);
+
   } catch (error) {
     console.error("發送群組通知失敗:", error);
     return c.json({

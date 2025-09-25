@@ -5,7 +5,7 @@
     "start": "bun run --bun src/index.ts"
   },
   "dependencies": {
-    "@hono/zod-validator": "^0.7.2",
+    "@hono/zod-validator": "^0.7.3",
     "@node-rs/argon2": "^2.0.2",
     "connect-redis": "^9.0.0",
     "drizzle-kit": "^0.31.4",

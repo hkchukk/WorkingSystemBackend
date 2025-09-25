@@ -35,7 +35,7 @@ const router = new Hono<HonoGenericContext>();
 // Worker Registration
 router.post("/register/worker", zValidator("form", workerSignupSchema), async (c) => {
   if (c.get("session").get("id")) return c.text("已經登入", 401);
-  
+
   const platform = c.req.header("platform");
 
   if (!platform?.length) {
@@ -116,7 +116,7 @@ router.post("/register/employer", uploadDocument, zValidator("form", employerSig
   const fileType = (body.identificationType === "businessNo") ? "verficationDocument" : "identificationDocument";
   const files = uploadedFiles[fileType] || [];
 
-  if(files.length === 0) {
+  if (files.length === 0) {
     return c.text("No files uploaded for verification", 400);
   }
 
@@ -207,7 +207,8 @@ router.delete("/delete", authenticated, async (c) => {
     await dbClient.delete(workers).where(eq(workers.workerId, user.workerId));
     await UserCache.clearUserProfile(user.workerId, Role.WORKER);
     return c.text("Worker account deleted successfully", 200);
-  } else if (user.role === Role.EMPLOYER) {
+  }
+  if (user.role === Role.EMPLOYER) {
     await dbClient.delete(employers).where(eq(employers.employerId, user.employerId));
     await UserCache.clearUserProfile(user.employerId, Role.EMPLOYER);
     return c.text("Employer account deleted successfully", 200);
@@ -281,7 +282,7 @@ router.get("/profile", authenticated, async (c) => {
       }
     }
 
-    let ratingStats = await RatingCache.getRatingStats(user.workerId, Role.WORKER);
+    const ratingStats = await RatingCache.getRatingStats(user.workerId, Role.WORKER);
 
     if (!ratingStats) {
       const dbRatingStats = await dbClient
@@ -341,21 +342,21 @@ router.get("/profile", authenticated, async (c) => {
 
           if (presignedUrl) {
             return { ...doc, presignedUrl };
-          } else {
+          } 
             console.warn(`❌ 驗證文件 URL 生成失敗: ${doc.r2Name}`);
             return {
               ...doc,
               presignedUrl: null,
               error: "URL 生成失敗"
             };
-          }
+          
         })
       );
     } else {
       console.log(`Employer ${user.userId} 沒有驗證文件或格式不正確`);
     }
 
-    let ratingStats = await RatingCache.getRatingStats(user.employerId, Role.EMPLOYER);
+    const ratingStats = await RatingCache.getRatingStats(user.employerId, Role.EMPLOYER);
 
     if (!ratingStats) {
       const dbRatingStats = await dbClient
@@ -462,18 +463,8 @@ router.put("/update/profile", authenticated, async (c) => {
 router.put("/update/password", authenticated, async (c) => {
   try {
     const user = c.get("user");
-    const body = await c.req.json();
-    const { currentPassword, newPassword } = body;
-
-    if (!currentPassword || !newPassword) {
-      return c.text("Current and new passwords are required", 400);
-    }
-
-    if (currentPassword === newPassword) {
-      return c.text("New password cannot be the same as current password", 400);
-    }
-
-    const validation = updatePasswordSchema.safeParse(body);
+    const bodyJson = await c.req.json();
+    const validation = updatePasswordSchema.safeParse(bodyJson);
     if (!validation.success) {
       return c.json(
         {
@@ -482,6 +473,16 @@ router.put("/update/password", authenticated, async (c) => {
         },
         400
       );
+    }
+
+    const { currentPassword, newPassword } = validation.data;
+
+    if (!currentPassword || !newPassword) {
+      return c.text("Current and new passwords are required", 400);
+    }
+
+    if (currentPassword === newPassword) {
+      return c.text("New password cannot be the same as current password", 400);
     }
 
     if (user.role === Role.WORKER) {
@@ -503,7 +504,8 @@ router.put("/update/password", authenticated, async (c) => {
       await dbClient.update(workers).set({ password: hashedNewPassword, updatedAt: sql`now()` }).where(eq(workers.workerId, user.workerId));
 
       return c.text("Password updated successfully");
-    } else if (user.role === Role.EMPLOYER) {
+    }
+    if (user.role === Role.EMPLOYER) {
       const employer = await dbClient.query.employers.findFirst({
         where: eq(employers.employerId, user.employerId),
       });
@@ -522,9 +524,8 @@ router.put("/update/password", authenticated, async (c) => {
       await dbClient.update(employers).set({ password: hashedNewPassword, updatedAt: sql`now()` }).where(eq(employers.employerId, user.employerId));
 
       return c.text("Password updated successfully");
-    } else {
-      return c.text("Invalid user role for password update", 400);
     }
+    return c.text("Invalid user role for password update", 400);
   } catch (error) {
     console.error("Error updating password:", error);
     return c.text("Internal server error", 500);
@@ -551,7 +552,7 @@ router.put("/update/identification", authenticated, requireEmployer, uploadDocum
       return c.text("Invalid identification number", 400);
     }
 
-    const uploadDBFiles = files.map((file: {filename: string; name: string; type: string }) => ({
+    const uploadDBFiles = files.map((file: { filename: string; name: string; type: string }) => ({
       originalName: file.name as string,
       type: file.type as string,
       r2Name: file.filename as string
@@ -562,9 +563,9 @@ router.put("/update/identification", authenticated, requireEmployer, uploadDocum
         const key = `identification/${user.userId}/${file.filename}`;
         await s3Client.file(key).write(file.file as Blob, { type: file.type });
       })
-    ); 
+    );
 
-    if(user.verificationDocuments && user.verificationDocuments.length > 0) {
+    if (user.verificationDocuments && user.verificationDocuments.length > 0) {
       await Promise.all(
         user.verificationDocuments.map(async (doc: { r2Name: string }) => {
           await s3Client.delete(`identification/${user.userId}/${doc.r2Name}`);
@@ -604,7 +605,7 @@ router.put("/update/profilePhoto", authenticated, uploadProfilePhoto, async (c) 
 
   try {
     if (isDelete) {
-      if (user.role == Role.WORKER) {
+      if (user.role === Role.WORKER) {
         if (!user.profilePhoto?.r2Name) return c.text("No profile photo to delete", 200);
         await s3Client.delete(`profile-photos/workers/${user.profilePhoto.r2Name}`);
         await dbClient
@@ -614,7 +615,7 @@ router.put("/update/profilePhoto", authenticated, uploadProfilePhoto, async (c) 
         return c.text("worker profile photo deleted", 200);
       }
 
-      if (user.role == Role.EMPLOYER) {
+      if (user.role === Role.EMPLOYER) {
         if (!user.employerPhoto?.r2Name) return c.text("No profile photo to delete", 200);
         await s3Client.delete(`profile-photos/employers/${user.employerPhoto.r2Name}`);
         await dbClient
@@ -633,10 +634,10 @@ router.put("/update/profilePhoto", authenticated, uploadProfilePhoto, async (c) 
       r2Name: photoFile.filename as string,
     };
 
-    if (user.role == Role.WORKER) {
+    if (user.role === Role.WORKER) {
       if (user.profilePhoto?.r2Name) await s3Client.delete(`profile-photos/workers/${user.profilePhoto.r2Name}`);
       await s3Client.file(`profile-photos/workers/${photoFile.filename}`).write(photoFile.file as Blob, { type: photoFile.type });
-      
+
       await dbClient
         .update(workers)
         .set({
@@ -646,10 +647,11 @@ router.put("/update/profilePhoto", authenticated, uploadProfilePhoto, async (c) 
         .where(eq(workers.workerId, user.userId));
       return c.text("worker profile photo updated successfully", 200);
 
-    } else if (user.role == Role.EMPLOYER) {
+    } 
+    if (user.role === Role.EMPLOYER) {
       if (user.employerPhoto?.r2Name) await s3Client.delete(`profile-photos/employers/${user.employerPhoto.r2Name}`);
       await s3Client.file(`profile-photos/employers/${photoFile.filename}`).write(photoFile.file as Blob, { type: photoFile.type });
-      
+
       await dbClient
         .update(employers)
         .set({
@@ -657,7 +659,7 @@ router.put("/update/profilePhoto", authenticated, uploadProfilePhoto, async (c) 
           updatedAt: sql`now()`,
         })
         .where(eq(employers.employerId, user.employerId));
-      
+
       return c.text("employer profile photo updated successfully", 200);
     }
     return c.text("invalid role", 400);
@@ -665,9 +667,9 @@ router.put("/update/profilePhoto", authenticated, uploadProfilePhoto, async (c) 
     console.error("更新個人照片時出錯:", error);
     return c.text("伺服器內部錯誤", 500);
   } finally {
-    if (user.role == Role.WORKER) {
+    if (user.role === Role.WORKER) {
       await UserCache.clearUserProfile(user.workerId, Role.WORKER);
-    } else if (user.role == Role.EMPLOYER) {
+    } else if (user.role === Role.EMPLOYER) {
       await UserCache.clearUserProfile(user.employerId, Role.EMPLOYER);
     }
   }
@@ -730,7 +732,7 @@ router.post("/pw-reset/verify", zValidator("json", passwordResetVerifySchema), a
     const hashedPassword = await argon2hash(newPassword, argon2Config);
     let platform: string;
 
-    
+
     if (worker) {
       await dbClient
         .update(workers)

@@ -9,8 +9,8 @@ import { gigs, gigApplications, attendanceCodes } from "../Schema/DatabaseSchema
 import { zValidator } from "@hono/zod-validator";
 import { createGigSchema, updateGigSchema } from "../Types/zodSchema";
 import { uploadEnvironmentPhotos } from "../Middleware/fileUpload";
-import moment from "moment";
 import { FileManager, s3Client, GigCache } from "../Client/Cache/Index";
+import { DateUtils } from "../Utils/DateUtils";
 import { generateAttendanceCode } from "../Utils/AttendanceUtils";
 
 const router = new Hono<HonoGenericContext>();
@@ -162,10 +162,10 @@ function buildGigData(body: any, user: any, environmentPhotosInfo: any) {
   return {
     employerId: user.employerId,
     ...body,
-    dateStart: dateStart ? moment(dateStart).format("YYYY-MM-DD") : null,
-    dateEnd: dateEnd ? moment(dateEnd).format("YYYY-MM-DD") : null,
-    publishedAt: publishedAt ? moment(publishedAt).format("YYYY-MM-DD") : moment().format("YYYY-MM-DD"),
-    unlistedAt: unlistedAt ? moment(unlistedAt).format("YYYY-MM-DD") : null,
+    dateStart: dateStart ? DateUtils.formatDate(dateStart) : null,
+    dateEnd: dateEnd ? DateUtils.formatDate(dateEnd) : null,
+    publishedAt: publishedAt ? DateUtils.formatDate(publishedAt) : DateUtils.getCurrentDate(),
+    unlistedAt: unlistedAt ? DateUtils.formatDate(unlistedAt) : null,
     environmentPhotos: environmentPhotosInfo ? environmentPhotosInfo : null,
   };
 }
@@ -204,10 +204,10 @@ router.delete("/deleteFile/:filename", authenticated, requireEmployer, requireAp
       );
     }
 
-    const today = moment().format("YYYY-MM-DD");
+    const today = DateUtils.getCurrentDate();
 
     // 檢查工作是否已過期
-    if (moment(targetGig.dateEnd).format("YYYY-MM-DD") < today) {
+    if (DateUtils.formatDate(targetGig.dateEnd) < today) {
       return c.json(
         {
           message: "工作已過期，無法刪除照片",
@@ -298,7 +298,7 @@ router.get("/public", async (c) => {
     */
 
     // 處理日期邏輯
-    const today = moment().format("YYYY-MM-DD");
+    const today = DateUtils.getCurrentDate();
     const searchDateStart = dateStart || today;
 
     // 建立查詢條件
@@ -373,7 +373,7 @@ router.get("/public/:gigId", async (c) => {
       return c.json({ error: "Gig ID is required" }, 400);
     }
 
-    const today = moment().format("YYYY-MM-DD");
+    const today = DateUtils.getCurrentDate();
 
     const whereConditions = [
       eq(gigs.gigId, gigId),
@@ -494,7 +494,7 @@ router.get("/my-gigs", authenticated, requireEmployer, async (c) => {
     const status = c.req.query("status") || "ongoing";
     const requestLimit = Number.parseInt(limit);
     const requestOffset = Number.parseInt(offset);
-    const currentDate = moment().format("YYYY-MM-DD");
+    const currentDate = DateUtils.getCurrentDate();
 
     // 建立基本查詢條件
     const whereConditions = [eq(gigs.employerId, user.employerId)];
@@ -514,14 +514,11 @@ router.get("/my-gigs", authenticated, requireEmployer, async (c) => {
         // 已關閉：isActive = false
         whereConditions.push(eq(gigs.isActive, false));
       } else if (status === "unpublished") {
-        // 已下架：isActive = true 且 unlistedAt <= currentDate 且 dateEnd >= currentDate
+        // 已下架：isActive = true 且 unlistedAt 不為空 且 dateEnd >= currentDate
         whereConditions.push(
-          eq(gigs.isActive, true), 
+          eq(gigs.isActive, true),
           gte(gigs.dateEnd, currentDate),
-          and(
-            sql`${gigs.unlistedAt} IS NOT NULL`,
-            lte(gigs.unlistedAt, currentDate)
-          )
+          sql`${gigs.unlistedAt} IS NOT NULL`
         );
       }
     }
@@ -553,10 +550,10 @@ router.get("/my-gigs", authenticated, requireEmployer, async (c) => {
     const gigsWithPhotos = await Promise.all(
       returnGigs.map(async (gig) => ({
         ...gig,
-        dateStart: gig.dateStart ? moment(gig.dateStart).format("YYYY-MM-DD") : null,
-        dateEnd: gig.dateEnd ? moment(gig.dateEnd).format("YYYY-MM-DD") : null,
-        publishedAt: gig.publishedAt ? moment(gig.publishedAt).format("YYYY-MM-DD") : null,
-        unlistedAt: gig.unlistedAt ? moment(gig.unlistedAt).format("YYYY-MM-DD") : null,
+        dateStart: gig.dateStart ? DateUtils.formatDate(gig.dateStart) : null,
+        dateEnd: gig.dateEnd ? DateUtils.formatDate(gig.dateEnd) : null,
+        publishedAt: gig.publishedAt ? DateUtils.formatDate(gig.publishedAt) : null,
+        unlistedAt: gig.unlistedAt ? DateUtils.formatDate(gig.unlistedAt) : null,
         environmentPhotos: await formatEnvironmentPhotos(gig.environmentPhotos, 1),
       }))
     );
@@ -607,7 +604,7 @@ router.get("/:gigId", authenticated, requireEmployer, async (c) => {
     }
 
     // 檢查當天是否已有打卡碼
-    const today = moment().format("YYYY-MM-DD");
+    const today = DateUtils.getCurrentDate();
     const existingCode = await dbClient.query.attendanceCodes.findFirst({
       where: and(
         eq(attendanceCodes.gigId, gigId),
@@ -687,10 +684,10 @@ router.put(
         return c.text("工作不存在或無權限修改", 404);
       }
 
-      const today = moment().format("YYYY-MM-DD");
+      const today = DateUtils.getCurrentDate();
 
       // 檢查工作是否已過期
-      if (moment(existingGig.dateEnd).format("YYYY-MM-DD") < today) {
+      if (DateUtils.formatDate(existingGig.dateEnd) < today) {
         return c.text("工作已過期，無法更新", 400);
       }
 
@@ -709,10 +706,10 @@ router.put(
         .set({
           ...body,
           updatedAt: sql`now()`,
-          dateStart: body.dateStart ? moment(body.dateStart).format("YYYY-MM-DD") : undefined,
-          dateEnd: body.dateEnd ? moment(body.dateEnd).format("YYYY-MM-DD") : undefined,
-          publishedAt: body.publishedAt ? moment(body.publishedAt).format("YYYY-MM-DD") : moment().format("YYYY-MM-DD"),
-          unlistedAt: body.unlistedAt ? moment(body.unlistedAt).format("YYYY-MM-DD") : undefined,
+          dateStart: body.dateStart ? DateUtils.formatDate(body.dateStart) : undefined,
+          dateEnd: body.dateEnd ? DateUtils.formatDate(body.dateEnd) : undefined,
+          publishedAt: body.publishedAt ? DateUtils.formatDate(body.publishedAt) : DateUtils.getCurrentDate(),
+          unlistedAt: body.unlistedAt ? DateUtils.formatDate(body.unlistedAt) : undefined,
           environmentPhotos: addedCount > 0 ? environmentPhotosInfo : undefined,
         })
         .where(eq(gigs.gigId, gigId));
@@ -758,7 +755,7 @@ router.patch("/:gigId/toggle-status", authenticated, requireEmployer, requireApp
   const user = c.get("user");
   try {
     const gigId = c.req.param("gigId");
-    const today = moment().format("YYYY-MM-DD");
+    const today = DateUtils.getCurrentDate();
 
     // 查詢獲取工作資料
     const gigWithApplications = await dbClient.query.gigs.findFirst({
@@ -781,7 +778,7 @@ router.patch("/:gigId/toggle-status", authenticated, requireEmployer, requireApp
     }
 
     // 如果工作已自然過期，不允許手動關閉
-    if (moment(gigWithApplications.dateEnd).format("YYYY-MM-DD") < today) {
+    if (DateUtils.formatDate(gigWithApplications.dateEnd) < today) {
       return c.json(
         {
           message: "工作已過期結束，無法手動操作",
@@ -847,10 +844,10 @@ router.patch("/:gigId/toggle-listing", authenticated, requireEmployer, requireAp
       return c.text("工作不存在或無權限修改", 404);
     }
 
-    const today = moment().format("YYYY-MM-DD");
+    const today = DateUtils.getCurrentDate();
 
     // 檢查工作是否已過期
-    if (moment(existingGig.dateEnd).format("YYYY-MM-DD") < today) {
+    if (DateUtils.formatDate(existingGig.dateEnd) < today) {
       return c.text("工作已過期，無法操作", 400);
     }
 
@@ -863,7 +860,7 @@ router.patch("/:gigId/toggle-listing", authenticated, requireEmployer, requireAp
 
     // 如果要下架工作，檢查是否已發佈
     if (isCurrentlyListed) {
-      if (moment(existingGig.publishedAt).format("YYYY-MM-DD") > today) {
+      if (DateUtils.formatDate(existingGig.publishedAt) > today) {
         return c.text("工作尚未發佈，無法下架", 400);
       }
     }
@@ -916,7 +913,7 @@ router.get("/employer/calendar", authenticated, requireEmployer, requireApproved
       );
     }
 
-    const currentDate = moment().format("YYYY-MM-DD");
+    const currentDate = DateUtils.getCurrentDate();
     const whereConditions = [
       eq(gigs.employerId, user.employerId),
       eq(gigs.isActive, true),
@@ -940,8 +937,7 @@ router.get("/employer/calendar", authenticated, requireEmployer, requireApproved
       }
 
       // 建立該月份的開始和結束日期
-      const startDate = moment(`${yearNum}-${monthNum.toString().padStart(2, "0")}-01`).format("YYYY-MM-DD");
-      const endDate = moment(startDate).endOf("month").format("YYYY-MM-DD");
+      const { startDate, endDate } = DateUtils.getMonthRange(yearNum, monthNum);
 
       // 查詢工作期間與該月有重疊的工作
       whereConditions.push(and(lte(gigs.dateStart, endDate), gte(gigs.dateEnd, startDate)));

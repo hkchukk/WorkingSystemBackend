@@ -8,7 +8,7 @@ import { eq, and, desc, sql, count, lt, avg } from "drizzle-orm";
 import { gigs, gigApplications, workers, employers, workerRatings, employerRatings } from "../Schema/DatabaseSchema";
 import { zValidator } from "@hono/zod-validator";
 import { createRatingSchema } from "../Types/zodSchema";
-import moment from "moment";
+import { DateUtils } from "../Utils/DateUtils";
 
 const router = new Hono<HonoGenericContext>();
 
@@ -51,7 +51,7 @@ router.post(
       }
 
       // 直接查詢符合所有條件的記錄，並檢查工作是否已結束
-      const currentDate = moment().format("YYYY-MM-DD"); // YYYY-MM-DD 格式
+      const currentDate = DateUtils.getCurrentDate(); // YYYY-MM-DD 格式
       const validGig = await dbClient.query.gigs.findFirst({
         where: and(
           eq(gigs.gigId, gigId),
@@ -147,7 +147,7 @@ router.post(
       }
       
       // 直接查詢符合所有條件的記錄，並檢查工作是否已結束
-      const currentDate = moment().format("YYYY-MM-DD"); // YYYY-MM-DD 格式
+      const currentDate = DateUtils.getCurrentDate(); // YYYY-MM-DD 格式
       const validGig = await dbClient.query.gigs.findFirst({
         where: and(
           eq(gigs.gigId, gigId),
@@ -663,7 +663,7 @@ router.get("/list/employer/gig/:gigId", authenticated, requireEmployer, requireA
     const requestLimit = Number.parseInt(limit);
     const requestOffset = Number.parseInt(offset);
     const employerId = user.employerId;
-    const currentDate = moment().format("YYYY-MM-DD");
+    const currentDate = DateUtils.getCurrentDate();
 
     // 驗證篩選參數
     if (!["rated", "unrated", "all"].includes(status)) {
@@ -772,7 +772,7 @@ router.get("/list/worker", authenticated, requireWorker, async (c) => {
     const requestLimit = Number.parseInt(limit);
     const requestOffset = Number.parseInt(offset);
     const workerId = user.workerId;
-    const currentDate = moment().format("YYYY-MM-DD");
+    const currentDate = DateUtils.getCurrentDate();
 
     // 查詢該打工者可評分的工作
     const ratableGigs = await dbClient

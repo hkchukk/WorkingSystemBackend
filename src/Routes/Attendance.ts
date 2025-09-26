@@ -18,7 +18,7 @@ import {
   getAttendanceRecordsSchema,
   updateAttendanceRecordSchema
 } from "../Types/zodSchema";
-import moment from "moment";
+import { DateUtils } from "../Utils/DateUtils";
 
 const router = new Hono<HonoGenericContext>();
 
@@ -42,7 +42,7 @@ router.post(
     }
 
     try {
-      const today = moment().format("YYYY-MM-DD");
+      const today = DateUtils.getCurrentDate();
       
       // 驗證打卡碼
       const validCode = await dbClient.query.attendanceCodes.findFirst({
@@ -123,9 +123,9 @@ router.post(
       }
 
       // 判斷打卡狀態和時間限制
-      const now = moment();
-      const todayTimeStart = moment(`${today} ${gig.timeStart}`);
-      const todayTimeEnd = moment(`${today} ${gig.timeEnd}`);
+      const now = DateUtils.getCurrentDateTime();
+      const todayTimeStart = DateUtils.createDateTime(today, gig.timeStart);
+      const todayTimeEnd = DateUtils.createDateTime(today, gig.timeEnd);
       
       let status: "on_time" | "late" | "early";
       
@@ -200,7 +200,7 @@ router.get(
     const user = c.get("user");
     
     try {
-      const today = moment().format("YYYY-MM-DD");
+      const today = DateUtils.getCurrentDate();
       
       const todayJobs = await dbClient
         .select({
@@ -285,7 +285,7 @@ router.get(
       const requestOffset = Number.parseInt(offset);
       const whereConditions = [];
 
-      if (dateStart && dateEnd && moment(dateEnd).isBefore(moment(dateStart))) {
+      if (dateStart && dateEnd && DateUtils.isDateBefore(dateEnd, dateStart)) {
         return c.json({
           message: "結束日期不能早於開始日期"
         }, 400);

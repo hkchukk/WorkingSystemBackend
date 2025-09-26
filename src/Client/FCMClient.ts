@@ -3,12 +3,12 @@ import { fcmConfig } from "../config";
 
 export interface FCMTokenData {
   token: string;
-  deviceType?: "android" | "ios" | "web";
+  deviceType: "android" | "ios" | "web";
 }
 
 class FCMClient {
   private static instance: FCMClient;
-  private adminApp: admin.app.App | null = null;
+  private adminApp: admin.app.App | null;
 
   private constructor() {
     this.initializeFirebase();

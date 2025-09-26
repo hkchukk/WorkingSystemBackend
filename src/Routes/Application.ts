@@ -16,7 +16,7 @@ import {
 } from "../Schema/DatabaseSchema";
 import { zValidator } from "@hono/zod-validator";
 import { reviewApplicationSchema } from "../Types/zodSchema";
-import moment from "moment";
+import { DateUtils } from "../Utils/DateUtils";
 import NotificationHelper from "../Utils/NotificationHelper";
 import { Role } from "../Types/types";
 
@@ -36,14 +36,14 @@ router.post(
     try {
       const user = c.get("user");
       const gigId = c.req.param("gigId");
-      const currentDate = moment().set({ hour: 0, minute: 0, second: 0, millisecond: 0 });
+      const currentDate = DateUtils.getCurrentDate();
       const gig = await dbClient.query.gigs.findFirst({
         where: and(
           eq(gigs.gigId, gigId),
           eq(gigs.isActive, true),
-          lte(gigs.publishedAt, currentDate.format('YYYY-MM-DD')),
-          gte(gigs.dateEnd, currentDate.format('YYYY-MM-DD')),
-          sql`(${gigs.unlistedAt} IS NULL OR ${gigs.unlistedAt} >= ${currentDate.format('YYYY-MM-DD')})`
+          lte(gigs.publishedAt, currentDate),
+          gte(gigs.dateEnd, currentDate),
+          sql`(${gigs.unlistedAt} IS NULL OR ${gigs.unlistedAt} >= ${currentDate})`
         )
       });
 
@@ -281,8 +281,7 @@ router.get("/worker/calendar", authenticated, requireWorker, async (c) => {
         }, 400);
       }
 
-      const startDate = moment(`${yearNum}-${monthNum.toString().padStart(2, '0')}-01`).format('YYYY-MM-DD');
-      const endDate = moment(startDate).endOf('month').format('YYYY-MM-DD');
+      const { startDate, endDate } = DateUtils.getMonthRange(yearNum, monthNum);
 
       // 過濾工作期間與該月有重疊的工作
       whereConditions.push(
@@ -625,7 +624,7 @@ router.put(
       }
 
       // 檢查工作是否已過期
-      const currentDate = moment().format('YYYY-MM-DD');
+      const currentDate = DateUtils.getCurrentDate();
       if (application.gig.dateEnd && application.gig.dateEnd < currentDate) {
         return c.json({
           message: "此工作已過期，無法審核申請",

@@ -1,6 +1,6 @@
 import * as z from "zod";
 import { isValidCity, isValidDistrict } from "../Utils/AreaData";
-import moment from "moment";
+import { DateUtils } from "../Utils/DateUtils";
 import { Role } from "./types";
 
 export const loginSchema = z.object({
@@ -202,9 +202,7 @@ export const createGigSchema = z.object({
   }),
 }).refine((data) => {
   if (data.timeStart && data.timeEnd) {
-    const startTime = moment(data.timeStart, "HH:mm");
-    const endTime = moment(data.timeEnd, "HH:mm");
-    return endTime.isAfter(startTime);
+    return DateUtils.isTimeAfter(data.timeEnd, data.timeStart);
   }
   return true;
 }, {
@@ -368,9 +366,7 @@ export const updateGigSchema = z.object({
   .refine((data) => {
     // 時間關係
     if (data.timeStart && data.timeEnd) {
-      const startTime = moment(data.timeStart, "HH:mm");
-      const endTime = moment(data.timeEnd, "HH:mm");
-      return endTime.isAfter(startTime);
+      return DateUtils.isTimeAfter(data.timeEnd, data.timeStart);
     }
     return true;
   }, {

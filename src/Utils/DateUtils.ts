@@ -82,4 +82,22 @@ export class DateUtils {
     const d = moment(date).utcOffset(DateUtils.TAIPEI_UTC_OFFSET).add(days, 'days');
     return d.format("YYYY-MM-DD");
   }
+
+  /**
+   * 獲取台北時區今天的 Date 物件 (用於日期比較驗證)
+   * @returns 台北時區今天的 Date 物件，時間設為 00:00:00:000
+   */
+  static getCurrentDateObject(): Date {
+    const today = moment().utcOffset(DateUtils.TAIPEI_UTC_OFFSET);
+    today.set({ hour: 0, minute: 0, second: 0, millisecond: 0 });
+    return today.toDate();
+  }
+
+  /**
+   * 獲取台北時區當前時間的 Date 物件
+   * @returns 台北時區當前時間的 Date 物件
+   */
+  static getCurrentDateTimeObject(): Date {
+    return moment().utcOffset(DateUtils.TAIPEI_UTC_OFFSET).toDate();
+  }
 }

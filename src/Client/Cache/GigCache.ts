@@ -1,5 +1,6 @@
 import { CacheManager } from "./CacheManager";
 import { CACHE_PREFIXES, CACHE_TTL } from "./CacheConfig";
+import { DateUtils } from "../../Utils/DateUtils";
 
 // 工作相關快取
 export class GigCache {
@@ -33,7 +34,7 @@ export class GigCache {
    */
   static async setMyGigsCount(employerId: string, status: string, totalCount: number): Promise<void> {
     const key = `${CACHE_PREFIXES.MY_GIGS_COUNT}${employerId}:${status}`;
-    await CacheManager.set(key, { totalCount, updatedAt: new Date().toISOString() }, CACHE_TTL.MY_GIGS_COUNT);
+    await CacheManager.set(key, { totalCount, updatedAt: DateUtils.getCurrentDateTimeObject().toISOString() }, CACHE_TTL.MY_GIGS_COUNT);
   }
 
   /**

@@ -131,15 +131,13 @@ export const createGigSchema = z.object({
   title: z.string().min(1, "工作標題不能為空").max(256, "工作標題過長"),
   description: z.string().min(1, "工作描述不能為空").max(10000, "工作描述過長"),
   dateStart: z.coerce.date().refine((date) => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    const today = DateUtils.getCurrentDateObject();
     return date >= today;
   }, {
     message: "工作開始日期不能是過去的日期"
   }),
   dateEnd: z.coerce.date().refine((date) => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    const today = DateUtils.getCurrentDateObject();
     return date >= today;
   }, {
     message: "工作結束日期不能是過去的日期"
@@ -185,21 +183,6 @@ export const createGigSchema = z.object({
   contactPerson: z.string().min(1, "聯絡人不能為空").max(32, "聯絡人姓名過長"),
   contactPhone: z.string().regex(/^(09\d{8}|\+8869\d{8}|0\d{1,2}-?\d{6,8})$/, "聯絡電話格式不正確").optional(),
   contactEmail: z.email("聯絡人 Email 格式不正確").max(128, "Email 過長").optional(),
-  publishedAt: z.coerce.date().default(() => new Date()).refine((date) => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    return date >= today;
-  }, {
-    message: "刊登日期不能是過去的日期"
-  }),
-  unlistedAt: z.coerce.date().optional().refine((date) => {
-    if (!date) return true;
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    return date >= today;
-  }, {
-    message: "下架日期不能是過去的日期"
-  }),
 }).refine((data) => {
   if (data.timeStart && data.timeEnd) {
     return DateUtils.isTimeAfter(data.timeEnd, data.timeStart);
@@ -216,14 +199,6 @@ export const createGigSchema = z.object({
 }, {
   message: "結束日期必須晚於或等於開始日期",
   path: ["dateEnd"]
-}).refine((data) => {
-  if (data.publishedAt && data.unlistedAt) {
-    return data.unlistedAt >= data.publishedAt;
-  }
-  return true;
-}, {
-  message: "下架日期必須晚於刊登日期",
-  path: ["unlistedAt"]
 }).refine((data) => {
   // 驗證城市是否有效
   return isValidCity(data.city);
@@ -243,16 +218,14 @@ export const updateGigSchema = z.object({
   description: z.string().min(1, "工作描述不能為空").max(10000, "工作描述過長").optional(),
   dateStart: z.coerce.date().optional().refine((date) => {
     if (!date) return true; // 可選字段，沒值就通過
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    const today = DateUtils.getCurrentDateObject();
     return date >= today;
   }, {
     message: "工作開始日期不能是過去的日期"
   }),
   dateEnd: z.coerce.date().optional().refine((date) => {
     if (!date) return true; // 可選字段，沒值就通過
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    const today = DateUtils.getCurrentDateObject();
     return date >= today;
   }, {
     message: "工作結束日期不能是過去的日期"
@@ -298,23 +271,6 @@ export const updateGigSchema = z.object({
   contactPerson: z.string().min(1, "聯絡人不能為空").max(32, "聯絡人姓名過長").optional(),
   contactPhone: z.string().regex(/^(09\d{8}|\+8869\d{8}|0\d{1,2}-?\d{6,8})$/, "聯絡電話格式不正確").optional(),
   contactEmail: z.email("聯絡人 Email 格式不正確").max(128, "Email 過長").optional(),
-  publishedAt: z.coerce.date().optional().default(() => new Date()).refine((date) => {
-    if (!date) return true; // 可選字段，沒值就通過
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    return date >= today;
-  }, {
-    message: "刊登日期不能是過去的日期"
-  }),
-  unlistedAt: z.coerce.date().optional().refine((date) => {
-    if (!date) return true; // 可選字段，沒值就通過
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    return date >= today;
-  }, {
-    message: "下架日期不能是過去的日期"
-  }),
-  isActive: z.coerce.boolean().optional(),
 })
   // 1. 成對驗證
   .refine((data) => {
@@ -381,18 +337,6 @@ export const updateGigSchema = z.object({
   }, {
     message: "結束日期必須晚於或等於開始日期",
     path: ["dateEnd"]
-  }).refine((data) => {
-    // 刊登下架日期關係
-    const publishedAt = data.publishedAt;
-    const unlistedAt = data.unlistedAt;
-
-    if (publishedAt && unlistedAt) {
-      return unlistedAt >= publishedAt;
-    }
-    return true;
-  }, {
-    message: "下架日期必須晚於刊登日期",
-    path: ["unlistedAt"]
   });
 
 /* application route schemas */

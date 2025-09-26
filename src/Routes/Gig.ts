@@ -186,17 +186,14 @@ function buildGigData(body: any, user: any, environmentPhotosInfo: any) {
   const {
     dateStart,
     dateEnd,
-    publishedAt,
-    unlistedAt,
   } = body;
 
   return {
     employerId: user.employerId,
     ...body,
-    dateStart: dateStart ? DateUtils.formatDate(dateStart) : null,
-    dateEnd: dateEnd ? DateUtils.formatDate(dateEnd) : null,
-    publishedAt: publishedAt ? DateUtils.formatDate(publishedAt) : DateUtils.getCurrentDate(),
-    unlistedAt: unlistedAt ? DateUtils.formatDate(unlistedAt) : null,
+    dateStart: DateUtils.formatDate(dateStart),
+    dateEnd: DateUtils.formatDate(dateEnd),
+    publishedAt: DateUtils.formatDate(dateStart),
     environmentPhotos: environmentPhotosInfo ? environmentPhotosInfo : null,
   };
 }
@@ -580,9 +577,9 @@ router.get("/my-gigs", authenticated, requireEmployer, async (c) => {
     const gigsWithPhotos = await Promise.all(
       returnGigs.map(async (gig) => ({
         ...gig,
-        dateStart: gig.dateStart ? DateUtils.formatDate(gig.dateStart) : null,
-        dateEnd: gig.dateEnd ? DateUtils.formatDate(gig.dateEnd) : null,
-        publishedAt: gig.publishedAt ? DateUtils.formatDate(gig.publishedAt) : null,
+        dateStart: DateUtils.formatDate(gig.dateStart),
+        dateEnd: DateUtils.formatDate(gig.dateEnd),
+        publishedAt: DateUtils.formatDate(gig.publishedAt),
         unlistedAt: gig.unlistedAt ? DateUtils.formatDate(gig.unlistedAt) : null,
         environmentPhotos: await formatEnvironmentPhotos(gig.environmentPhotos, 1),
         status: await getGigStatus({
@@ -750,8 +747,7 @@ router.put(
           updatedAt: sql`now()`,
           dateStart: body.dateStart ? DateUtils.formatDate(body.dateStart) : undefined,
           dateEnd: body.dateEnd ? DateUtils.formatDate(body.dateEnd) : undefined,
-          publishedAt: body.publishedAt ? DateUtils.formatDate(body.publishedAt) : DateUtils.getCurrentDate(),
-          unlistedAt: body.unlistedAt ? DateUtils.formatDate(body.unlistedAt) : undefined,
+          publishedAt: body.dateStart ? DateUtils.formatDate(body.dateStart) : undefined,
           environmentPhotos: addedCount > 0 ? environmentPhotosInfo : undefined,
         })
         .where(eq(gigs.gigId, gigId));

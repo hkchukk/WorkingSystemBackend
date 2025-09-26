@@ -15,6 +15,37 @@ import { generateAttendanceCode } from "../Utils/AttendanceUtils";
 
 const router = new Hono<HonoGenericContext>();
 
+async function getGigStatus(gig: {
+  publishedAt: string;
+  unlistedAt: string | null;
+  isActive: boolean;
+  dateEnd: string;
+}): Promise<string> {
+  const today = DateUtils.getCurrentDate();
+  
+  // 1. 已關閉 (手動關閉)
+  if (!gig.isActive) {
+    return "已關閉";
+  }
+  
+  // 2. 已結束 (自動過期)
+  if (DateUtils.formatDate(gig.dateEnd) < today) {
+    return "已結束";
+  }
+  
+  // 3. 已下架 (手動下架)
+  if (gig.unlistedAt && DateUtils.formatDate(gig.unlistedAt) <= today) {
+    return "已下架";
+  }
+  
+  // 4. 已刊登 (正常運行)
+  if (DateUtils.formatDate(gig.publishedAt) <= today) {
+    return "已刊登";
+  }
+  
+  return "待刊登";
+}
+
 // 統一的照片上傳處理函數
 async function handlePhotoUpload(reqFile: any, existingPhotos: any[] = []) {
   // 如果沒有上傳檔案，返回現有照片
@@ -385,7 +416,6 @@ router.get("/public/:gigId", async (c) => {
     const gig = await dbClient.query.gigs.findFirst({
       where: and(...whereConditions),
       columns: {
-        isActive: false,
         createdAt: false,
       },
       with: {
@@ -555,6 +585,12 @@ router.get("/my-gigs", authenticated, requireEmployer, async (c) => {
         publishedAt: gig.publishedAt ? DateUtils.formatDate(gig.publishedAt) : null,
         unlistedAt: gig.unlistedAt ? DateUtils.formatDate(gig.unlistedAt) : null,
         environmentPhotos: await formatEnvironmentPhotos(gig.environmentPhotos, 1),
+        status: await getGigStatus({
+          publishedAt: gig.publishedAt,
+          unlistedAt: gig.unlistedAt,
+          isActive: gig.isActive,
+          dateEnd: gig.dateEnd,
+        }),
       }))
     );
 
@@ -648,7 +684,13 @@ router.get("/:gigId", authenticated, requireEmployer, async (c) => {
       {
         ...gig,
         environmentPhotos: await formatEnvironmentPhotos(gig.environmentPhotos),
-        attendanceCodeInfo
+        attendanceCodeInfo,
+        status: await getGigStatus({
+          publishedAt: gig.publishedAt,
+          unlistedAt: gig.unlistedAt,
+          isActive: gig.isActive,
+          dateEnd: gig.dateEnd,
+        }),
       },
       200
     );

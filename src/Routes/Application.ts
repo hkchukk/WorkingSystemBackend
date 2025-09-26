@@ -8,13 +8,12 @@ import {
 import type IRouter from "../Interfaces/IRouter";
 import type { HonoGenericContext } from "../Types/types";
 import dbClient from "../Client/DrizzleClient";
-import { eq, and, desc, or, lte, sql, gte, count, avg } from "drizzle-orm";
+import { eq, and, desc, or, lte, sql, gte } from "drizzle-orm";
 import {
   gigs,
   gigApplications,
   employers,
   workers,
-  workerRatings,
 } from "../Schema/DatabaseSchema";
 import { zValidator } from "@hono/zod-validator";
 import { reviewApplicationSchema } from "../Types/zodSchema";

@@ -461,7 +461,6 @@ export const createGroupNotificationSchema = z.object({
 
 // 打工者打卡
 export const attendanceCheckSchema = z.object({
-  workerId: z.string().min(1, "打工者ID不能為空"),
   gigId: z.string().min(1, "工作ID不能為空"),
   attendanceCode: z.string()
     .length(4, "打卡碼必須是4位數字")

@@ -33,14 +33,8 @@ router.post(
   zValidator("json", attendanceCheckSchema),
   async (c) => {
     const user = c.get("user");
-    const { workerId, gigId, attendanceCode, checkType } = c.req.valid("json");
+    const { gigId, attendanceCode, checkType } = c.req.valid("json");
     
-    if (user.workerId !== workerId) {
-      return c.json({
-        message: "工作者ID不匹配"
-      }, 403);
-    }
-
     try {
       const today = DateUtils.getCurrentDate();
       
@@ -63,7 +57,7 @@ router.post(
       // 檢查是否有核准的工作申請
       const application = await dbClient.query.gigApplications.findFirst({
         where: and(
-          eq(gigApplications.workerId, workerId),
+          eq(gigApplications.workerId, user.workerId),
           eq(gigApplications.gigId, gigId),
           eq(gigApplications.status, "approved")
         )
@@ -93,7 +87,7 @@ router.post(
       // 檢查打卡記錄狀態
       const todayRecords = await dbClient.query.attendanceRecords.findMany({
         where: and(
-          eq(attendanceRecords.workerId, workerId),
+          eq(attendanceRecords.workerId, user.workerId),
           eq(attendanceRecords.gigId, gigId),
           eq(attendanceRecords.workDate, today)
         )
@@ -168,7 +162,7 @@ router.post(
 
       await dbClient.insert(attendanceRecords).values({
         gigId,
-        workerId,
+        workerId: user.workerId,
         attendanceCodeId: validCode.codeId,
         checkType,
         workDate: today,

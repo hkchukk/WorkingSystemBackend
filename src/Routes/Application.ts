@@ -8,11 +8,13 @@ import {
 import type IRouter from "../Interfaces/IRouter";
 import type { HonoGenericContext } from "../Types/types";
 import dbClient from "../Client/DrizzleClient";
-import { eq, and, desc, or, lte, sql, gte } from "drizzle-orm";
+import { eq, and, desc, or, lte, sql, gte, count, avg } from "drizzle-orm";
 import {
   gigs,
   gigApplications,
   employers,
+  workers,
+  workerRatings,
 } from "../Schema/DatabaseSchema";
 import { zValidator } from "@hono/zod-validator";
 import { reviewApplicationSchema } from "../Types/zodSchema";
@@ -524,43 +526,71 @@ router.get("/gig/:gigId", authenticated, requireEmployer, requireApprovedEmploye
     const requestLimit = Number.parseInt(limit);
     const requestOffset = Number.parseInt(offset);
 
-    // 查詢申請記錄（多查一筆來判斷是否還有更多數據）
-    const applications = await dbClient.query.gigApplications.findMany({
-      where: and(...whereConditions),
-      with: {
-        worker: true,
+    // 查詢申請記錄和對應的 worker 評分統計
+    const applicationsWithRatings = await dbClient
+      .select({
+        applicationId: gigApplications.applicationId,
+        workerId: gigApplications.workerId,
+        status: gigApplications.status,
+        appliedAt: gigApplications.createdAt,
+        workerFirstName: workers.firstName,
+        workerLastName: workers.lastName,
+        workerEmail: workers.email,
+        workerPhone: workers.phoneNumber,
+        workerEducation: workers.highestEducation,
+        workerSchool: workers.schoolName,
+        workerMajor: workers.major,
+        workerCertificates: workers.certificates,
+        workerJobExperience: workers.jobExperience,
+        workerProfilePhoto: workers.profilePhoto,
+        totalRatings: sql<number>`COALESCE(rating_stats.total_ratings, 0)`,
+        averageRating: sql<number>`COALESCE(rating_stats.average_rating, 0)`,
+      })
+      .from(gigApplications)
+      .innerJoin(workers, eq(gigApplications.workerId, workers.workerId))
+      .leftJoin(
+        sql`(
+          SELECT 
+            worker_id,
+            COUNT(*)::int as total_ratings,
+            ROUND(AVG(rating_value), 2)::numeric as average_rating
+          FROM worker_ratings 
+          GROUP BY worker_id
+        ) as rating_stats`,
+        eq(gigApplications.workerId, sql`rating_stats.worker_id`)
+      )
+      .where(and(...whereConditions))
+      .orderBy(desc(gigApplications.createdAt))
+      .limit(requestLimit + 1) // 多查一筆來判斷 hasMore
+      .offset(requestOffset);
+
+    const hasMore = applicationsWithRatings.length > requestLimit;
+    const actualApplications = hasMore ? applicationsWithRatings.slice(0, requestLimit) : applicationsWithRatings;
+    const applicationsWithRatingData = actualApplications.map(app => ({
+      applicationId: app.applicationId,
+      workerId: app.workerId,
+      workerName: `${app.workerFirstName} ${app.workerLastName}`,
+      workerEmail: app.workerEmail,
+      workerPhone: app.workerPhone,
+      workerEducation: app.workerEducation,
+      workerSchool: app.workerSchool,
+      workerMajor: app.workerMajor,
+      workerCertificates: app.workerCertificates,
+      workerJobExperience: app.workerJobExperience,
+      workerProfilePhoto: app.workerProfilePhoto,
+      status: app.status,
+      appliedAt: app.appliedAt,
+      workerRating: {
+        totalRatings: Number(app.totalRatings),
+        averageRating: Number(Number(app.averageRating).toFixed(2)),
       },
-      orderBy: [desc(gigApplications.createdAt)],
-      limit: requestLimit + 1, // 多查一筆來判斷 hasMore
-      offset: requestOffset,
-    });
-
-    // 判斷是否有更多數據
-    const hasMore = applications.length > requestLimit;
-    const actualApplications = hasMore ? applications.slice(0, requestLimit) : applications;
-
-    // 計算統計資訊
-    // 按工作分組統計
+    }));
 
     return c.json({
       message: "獲取工作申請列表成功",
       data: {
         gigTitle: gig.title,
-        applications: actualApplications.map(app => ({
-          applicationId: app.applicationId,
-          workerId: app.workerId,
-          workerName: `${app.worker.firstName} ${app.worker.lastName}`,
-          workerEmail: app.worker.email,
-          workerPhone: app.worker.phoneNumber,
-          workerEducation: app.worker.highestEducation,
-          workerSchool: app.worker.schoolName,
-          workerMajor: app.worker.major,
-          workerCertificates: app.worker.certificates,
-          workerJobExperience: app.worker.jobExperience,
-          workerProfilePhoto: app.worker.profilePhoto,
-          status: app.status,
-          appliedAt: app.createdAt,
-        })),
+        applications: applicationsWithRatingData,
         pagination: {
           limit: requestLimit,
           offset: requestOffset,

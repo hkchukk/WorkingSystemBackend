@@ -4,8 +4,8 @@ import { requireEmployer, requireApprovedEmployer } from "../Middleware/guards";
 import type IRouter from "../Interfaces/IRouter";
 import type { HonoGenericContext } from "../Types/types";
 import dbClient from "../Client/DrizzleClient";
-import { eq, and, desc, sql, gte, lte, or, lt, gt, count } from "drizzle-orm";
-import { gigs, gigApplications, attendanceCodes } from "../Schema/DatabaseSchema";
+import { eq, and, desc, sql, gte, lte, lt, gt, count } from "drizzle-orm";
+import { gigs, attendanceCodes } from "../Schema/DatabaseSchema";
 import { zValidator } from "@hono/zod-validator";
 import { createGigSchema, updateGigSchema } from "../Types/zodSchema";
 import { uploadEnvironmentPhotos } from "../Middleware/fileUpload";
@@ -535,8 +535,8 @@ router.get("/my-gigs", authenticated, requireEmployer, async (c) => {
         // 未開始：dateStart > currentDate 且 isActive = true
         whereConditions.push(gt(gigs.dateStart, currentDate), eq(gigs.isActive, true));
       } else if (status === "completed") {
-        // 已結束：dateEnd < currentDate
-        whereConditions.push(lt(gigs.dateEnd, currentDate));
+        // 已結束：dateEnd < currentDate 且 isActive = true
+        whereConditions.push(lt(gigs.dateEnd, currentDate), eq(gigs.isActive, true));
       } else if (status === "ongoing") {
         // 進行中：dateStart <= currentDate AND dateEnd >= currentDate 且 isActive = true
         whereConditions.push(and(lte(gigs.dateStart, currentDate), gte(gigs.dateEnd, currentDate)), eq(gigs.isActive, true));
@@ -800,17 +800,11 @@ router.patch("/:gigId/toggle-status", authenticated, requireEmployer, requireApp
     const today = DateUtils.getCurrentDate();
 
     // 查詢獲取工作資料
-    const gigWithApplications = await dbClient.query.gigs.findFirst({
+    const gig = await dbClient.query.gigs.findFirst({
       where: and(eq(gigs.gigId, gigId), eq(gigs.employerId, user.employerId)),
-      with: {
-        gigApplications: {
-          where: eq(gigApplications.status, "approved"),
-          limit: 1, // 只需要知道是否存在已核准的申請
-        },
-      },
     });
 
-    if (!gigWithApplications) {
+    if (!gig) {
       return c.json(
         {
           message: "工作不存在或無權限修改",
@@ -820,7 +814,7 @@ router.patch("/:gigId/toggle-status", authenticated, requireEmployer, requireApp
     }
 
     // 如果工作已自然過期，不允許手動關閉
-    if (DateUtils.formatDate(gigWithApplications.dateEnd) < today) {
+    if (DateUtils.formatDate(gig.dateEnd) < today) {
       return c.json(
         {
           message: "工作已過期結束，無法手動操作",
@@ -830,20 +824,10 @@ router.patch("/:gigId/toggle-status", authenticated, requireEmployer, requireApp
     }
 
     // 如果工作已經關閉，不允許重新開啟
-    if (!gigWithApplications.isActive) {
+    if (!gig.isActive) {
       return c.json(
         {
           message: "工作已關閉，無法重新開啟",
-        },
-        400
-      );
-    }
-
-    // 檢查工作是否有已核准的申請者
-    if (gigWithApplications.gigApplications.length > 0) {
-      return c.json(
-        {
-          message: "工作有已核准的申請者，請先處理相關申請",
         },
         400
       );

@@ -33,7 +33,7 @@ import { getConnInfo } from 'hono/bun'
 const router = new Hono<HonoGenericContext>();
 
 // Worker Registration
-router.post("/register/worker", zValidator("form", workerSignupSchema), async (c) => {
+router.post("/register/worker", zValidator("json", workerSignupSchema), async (c) => {
   if (c.get("session").get("id")) return c.text("已經登入", 401);
 
   const platform = c.req.header("platform");
@@ -42,7 +42,7 @@ router.post("/register/worker", zValidator("form", workerSignupSchema), async (c
     return c.text("Platform is required", 400);
   }
 
-  const body = c.req.valid("form");
+  const body = c.req.valid("json");
   const {
     email,
     password,

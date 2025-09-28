@@ -113,11 +113,11 @@ router.post("/register/employer", uploadDocument, zValidator("form", employerSig
   if (c.get("session").get("id")) return c.text("已經登入", 401);
   const uploadedFiles = c.get("uploadedFiles") as Record<string, any>;
   const body = c.req.valid("form");
-  const fileType = (body.identificationType === "businessNo") ? "verficationDocument" : "identificationDocument";
+  const fileType = (body.identificationType === "businessNo") ? "verificationDocuments" : "identificationDocuments";
   const files = uploadedFiles[fileType] || [];
 
   if (files.length === 0) {
-    return c.text("No files uploaded for verification", 400);
+    return c.text("No files uploaded for " + fileType, 400);
   }
 
   try {

@@ -145,15 +145,6 @@ router.post("/register/employer", uploadDocument, zValidator("form", employerSig
 
       const hashedPassword = await argon2hash(password, argon2Config);
 
-      // 上傳身份證明文件到 S3
-      await Promise.all(
-        files.map(async (file: any) => {
-          const key = `documents/${identificationType}/${file.filename}`;
-          await s3Client.file(key).write(file.file as Blob, { type: file.type });
-          console.log(`File ${file.name} uploaded successfully`);
-        })
-      );
-
       const insertedUsers = await dbClient
         .insert(employers)
         .values({
@@ -166,12 +157,21 @@ router.post("/register/employer", uploadDocument, zValidator("form", employerSig
           phoneNumber,
           identificationType,
           identificationNumber,
-          verificationDocuments: JSON.stringify(filesInfo),
+          verificationDocuments: filesInfo,
           employerPhoto: null,
         })
         .returning();
 
       const newUser = insertedUsers[0];
+
+      // 上傳身份證明文件到 S3
+      await Promise.all(
+        files.map(async (file: any) => {
+          const key = `identification/${newUser.employerId}/${file.filename}`;
+          await s3Client.file(key).write(file.file as Blob, { type: file.type });
+          console.log(`File ${file.name} uploaded successfully`);
+        })
+      );
 
       // 發送歡迎[通知]給新註冊的商家
       await NotificationHelper.notifyUserWelcome(newUser.employerId, newUser.employerName, "employer");

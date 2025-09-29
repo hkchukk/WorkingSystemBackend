@@ -441,6 +441,10 @@ export const registerFCMTokenSchema = z.object({
   }),
 });
 
+export const deleteFCMTokensSchema = z.object({
+  tokens: z.array(z.string().min(1, "FCM token 不能為空")).min(1, "至少需要一個 token"),
+});
+
 export const sendTestPushSchema = z.object({
   title: z.string().min(1, "標題不能為空").max(256, "標題過長"),
   message: z.string().min(1, "訊息不能為空"),

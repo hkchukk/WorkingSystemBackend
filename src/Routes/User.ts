@@ -90,8 +90,8 @@ router.post("/register/worker", zValidator("json", workerSignupSchema), async (c
   await NotificationHelper.notifyUserWelcome(newUser.workerId, newUser.firstName, "worker");
 
   // 發送歡迎[郵件]給新註冊的打工者
-  const subject = "你好! 歡迎加入 KK";
-  const html = "<h1>Welcome</h1><p>加入 KK，開始你的打工之旅</p>";
+  const subject = "你好! 歡迎加入 WorkNow";
+  const html = EmailTemplates.generateWorkerWelcomeEmail(firstName);
   await sendEmail(email, subject, html);
 
   return c.json(
@@ -177,8 +177,8 @@ router.post("/register/employer", uploadDocument, zValidator("form", employerSig
       await NotificationHelper.notifyUserWelcome(newUser.employerId, newUser.employerName, "employer");
 
       // 發送歡迎[郵件]給新註冊的商家
-      const subject = "你好! 歡迎加入 KK！";
-      const html = "<h1>Welcome</h1><p>加入 KK，開始您的找人之旅</p>";
+      const subject = "你好! 歡迎加入 WorkNow！";
+      const html = EmailTemplates.generateEmployerWelcomeEmail(employerName);
       await sendEmail(email, subject, html);
 
       return c.json(
@@ -679,22 +679,33 @@ router.put("/update/profilePhoto", authenticated, uploadProfilePhoto, async (c) 
 router.post("/pw-reset/request", zValidator("json", passwordResetRequestSchema), async (c) => {
   try {
     const { email } = c.req.valid("json");
+    const platform = c.req.header("platform");
+
+    if (!platform?.length) {
+      return c.text("Platform is required", 400);
+    }
+
+    if (platform !== "mobile" && platform !== "web-employer") {
+      return c.text("Invalid platform", 400);
+    }
+
+    let userExists = null;
+
+    if (platform === "mobile") {
+      userExists = await dbClient.query.workers.findFirst({ where: eq(workers.email, email) });
+    } else if (platform === "web-employer") {
+      userExists = await dbClient.query.employers.findFirst({ where: eq(employers.email, email) });
+    }
+
     const resetStatus = await PasswordResetManager.getResetStatus(email);
 
     if (!resetStatus.canRequestNew) {
       return c.text(`請等待 ${resetStatus.remainingCooldownTime} 秒後再重新請求`, 429);
     }
 
-    const [worker, employer] = await Promise.all([
-      dbClient.query.workers.findFirst({ where: eq(workers.email, email) }),
-      dbClient.query.employers.findFirst({ where: eq(employers.email, email) })
-    ]);
-
-    const userExists = worker || employer;
-
     if (userExists) {
       const verificationCode = await PasswordResetManager.storeVerificationCode(email);
-      const subject = "密碼重設驗證碼";
+      const subject = "WorkNow 密碼重設驗證碼";
       const html = EmailTemplates.generatePasswordResetEmail(verificationCode, 30);
       await sendEmail(email, subject, html);
     } else {
@@ -712,50 +723,57 @@ router.post("/pw-reset/request", zValidator("json", passwordResetRequestSchema),
 router.post("/pw-reset/verify", zValidator("json", passwordResetVerifySchema), async (c) => {
   try {
     const { email, verificationCode, newPassword } = c.req.valid("json");
+    const platform = c.req.header("platform");
+
+    if (!platform?.length) {
+      return c.text("Platform is required", 400);
+    }
+
+    if (platform !== "mobile" && platform !== "web-employer") {
+      return c.text("Invalid platform", 400);
+    }
+
     const isValidCode = await PasswordResetManager.verifyCode(email, verificationCode);
 
     if (!isValidCode) {
       return c.text("驗證碼無效或已過期", 400);
     }
 
-    const [worker, employer] = await Promise.all([
-      dbClient.query.workers.findFirst({ where: eq(workers.email, email) }),
-      dbClient.query.employers.findFirst({ where: eq(employers.email, email) })
-    ]);
+    let userExists = null;
 
-    const userExists = worker || employer;
+    if (platform === "mobile") {
+      userExists = await dbClient.query.workers.findFirst({ where: eq(workers.email, email) });
+    } else if (platform === "web-employer") {
+      userExists = await dbClient.query.employers.findFirst({ where: eq(employers.email, email) });
+    }
 
     if (!userExists) {
       return c.text("用戶不存在", 404);
     }
 
     const hashedPassword = await argon2hash(newPassword, argon2Config);
-    let platform: string;
 
-
-    if (worker) {
+    if (platform === "mobile") {
       await dbClient
         .update(workers)
         .set({ password: hashedPassword, updatedAt: sql`now()` })
-        .where(eq(workers.workerId, worker.workerId));
+        .where(eq(workers.workerId, userExists.workerId));
 
-      platform = "mobile"
-      await UserCache.clearUserProfile(worker.workerId, Role.WORKER);
-    } else if (employer) {
+      await UserCache.clearUserProfile(userExists.workerId, Role.WORKER);
+    } else if (platform === "web-employer") {
       await dbClient
         .update(employers)
         .set({ password: hashedPassword, updatedAt: sql`now()` })
-        .where(eq(employers.employerId, employer.employerId));
+        .where(eq(employers.employerId, userExists.employerId));
 
-      platform = "web-employer"
-      await UserCache.clearUserProfile(employer.employerId, Role.EMPLOYER);
+      await UserCache.clearUserProfile(userExists.employerId, Role.EMPLOYER);
     }
 
     const info = getConnInfo(c)
     const clientIP = info.remote.address
     console.log(clientIP);
 
-    const subject = "密碼重設成功通知";
+    const subject = "WorkNow 密碼重設成功通知";
     const html = EmailTemplates.generatePasswordResetSuccessEmail();
     await sendEmail(email, subject, html);
     await PasswordResetManager.deleteVerificationCode(email);

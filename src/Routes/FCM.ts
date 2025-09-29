@@ -7,7 +7,7 @@ import dbClient from "../Client/DrizzleClient";
 import { eq, sql } from "drizzle-orm";
 import { workers, employers, admins } from "../Schema/DatabaseSchema";
 import { zValidator } from "@hono/zod-validator";
-import { registerFCMTokenSchema, sendTestPushSchema } from "../Types/zodSchema";
+import { registerFCMTokenSchema, deleteFCMTokensSchema, sendTestPushSchema } from "../Types/zodSchema";
 import FCMClient, { FCMTokenData } from "../Client/FCMClient";
 import NotificationHelper from "../Utils/NotificationHelper";
 
@@ -162,13 +162,12 @@ router.get("/tokens", authenticated, async (c) => {
 });
 
 // 刪除 FCM Token
-router.delete("/tokens/:token", authenticated, async (c) => {
+router.delete("/tokens", authenticated, zValidator("json", deleteFCMTokensSchema), async (c) => {
   try {
     const user = c.get("user");
-    const token = c.req.param("token");
+    const { tokens } = c.req.valid("json");
 
     // 獲取當前用戶的 FCM tokens
-    let currentTokens: string[] = [];
     let userData: any = null;
 
     if (user.role === Role.WORKER) {
@@ -197,21 +196,19 @@ router.delete("/tokens/:token", authenticated, async (c) => {
     let tokensData: FCMTokenData[] = [];
 
     if (userData.fcmTokens) {
-      tokensData = typeof userData.fcmTokens === 'string' 
-        ? JSON.parse(userData.fcmTokens) 
+      tokensData = typeof userData.fcmTokens === 'string'
+        ? JSON.parse(userData.fcmTokens)
         : userData.fcmTokens;
-      currentTokens = tokensData.map(tokenData => tokenData.token);
     }
 
-    if (!currentTokens.includes(token)) {
+    if (tokensData.length === 0) {
       return c.json({
-        message: "找不到該 FCM Token",
+        message: "用戶沒有任何 FCM Token",
       }, 404);
     }
 
-    const updatedTokens = tokensData.filter(t => t.token !== token);
+    const updatedTokens = tokensData.filter(t => !tokens.includes(t.token));
 
-    // 更新資料庫
     if (user.role === Role.WORKER) {
       await dbClient
         .update(workers)
@@ -237,8 +234,10 @@ router.delete("/tokens/:token", authenticated, async (c) => {
         .where(eq(admins.adminId, user.userId));
     }
 
+    const deletedCount = tokensData.length - updatedTokens.length;
+
     return c.json({
-      message: "FCM Token 刪除成功",
+      message: `${deletedCount} 個 FCM Token 刪除成功`,
     }, 200);
 
   } catch (error) {

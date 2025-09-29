@@ -92,7 +92,7 @@ export class EmailTemplates {
 
         <div class="footer">
             <p>此郵件由系統自動發送，請勿回覆</p>
-            <p>© 2025 KK 打工平台. 保留所有權利.</p>
+            <p>© 2025 WorkNow 打工平台. 保留所有權利.</p>
         </div>
     </div>
 </body>
@@ -109,7 +109,7 @@ export class EmailTemplates {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>密碼重設成功</title>
+    <title>WorkNow 密碼重設成功</title>
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -174,7 +174,240 @@ export class EmailTemplates {
 
         <div class="footer">
             <p>此郵件由系統自動發送，請勿回覆</p>
-            <p>© 2025 KK 打工平台. 保留所有權利.</p>
+            <p>© 2025 WorkNow 打工平台. 保留所有權利.</p>
+        </div>
+    </div>
+</body>
+</html>`;
+  }
+
+  /**
+   * 生成 Worker 註冊成功歡迎郵件
+   */
+  static generateWorkerWelcomeEmail(firstName: string): string {
+    return `
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>歡迎加入 WorkNow</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .container {
+            background: #f9f9f9;
+            padding: 30px;
+            border-radius: 10px;
+            border: 1px solid #ddd;
+        }
+        .header {
+            text-align: center;
+            color: #27ae60;
+            margin-bottom: 30px;
+        }
+        .welcome-icon {
+            font-size: 48px;
+            text-align: center;
+            margin: 20px 0;
+        }
+        .welcome-message {
+            background: #d4edda;
+            border: 1px solid #c3e6cb;
+            border-radius: 5px;
+            padding: 20px;
+            margin: 20px 0;
+            color: #155724;
+        }
+        .features {
+            background: #e7f3ff;
+            border: 1px solid #b3d7ff;
+            border-radius: 5px;
+            padding: 20px;
+            margin: 20px 0;
+        }
+        .features h3 {
+            color: #0066cc;
+            margin-top: 0;
+        }
+        .features ul {
+            margin: 10px 0 0 20px;
+        }
+        .cta-button {
+            display: inline-block;
+            background: #27ae60;
+            color: white;
+            padding: 15px 30px;
+            text-decoration: none;
+            border-radius: 5px;
+            margin: 20px 0;
+            font-weight: bold;
+        }
+        .footer {
+            text-align: center;
+            margin-top: 30px;
+            font-size: 14px;
+            color: #777;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🎉 歡迎加入 WorkNow！</h1>
+        </div>
+
+        <div class="welcome-icon">👋</div>
+
+        <p>親愛的 ${firstName}，</p>
+
+        <div class="welcome-message">
+            <strong>🎊 恭喜您成功註冊 WorkNow 打工平台！</strong><br>
+            您現在已經是我們大家庭的一員了。讓我們一起開始精彩的打工之旅吧！
+        </div>
+
+        <div class="features">
+            <h3>🚀 平台特色功能</h3>
+            <ul>
+                <li>📱 輕鬆找到最適合的工作機會</li>
+                <li>💼 多元化的工作類型選擇</li>
+                <li>⭐ 真實的評價和評論系統</li>
+                <li>💰 透明的薪資和福利資訊</li>
+            </ul>
+        </div>
+
+        <p>現在就開始瀏覽工作機會，找到最適合您的工作吧！</p>
+
+        <div style="text-align: center;">
+            <a href="#" class="cta-button">開始瀏覽工作</a>
+        </div>
+
+        <div class="footer">
+            <p>如果您有任何問題，歡迎隨時聯繫我們的客服團隊</p>
+            <p>此郵件由系統自動發送，請勿回覆</p>
+            <p>© 2025 WorkNow 打工平台. 保留所有權利.</p>
+        </div>
+    </div>
+</body>
+</html>`;
+  }
+
+  /**
+   * 生成 Employer 註冊成功歡迎郵件
+   */
+  static generateEmployerWelcomeEmail(employerName: string): string {
+    return `
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>歡迎加入 WorkNow</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .container {
+            background: #f9f9f9;
+            padding: 30px;
+            border-radius: 10px;
+            border: 1px solid #ddd;
+        }
+        .header {
+            text-align: center;
+            color: #27ae60;
+            margin-bottom: 30px;
+        }
+        .welcome-icon {
+            font-size: 48px;
+            text-align: center;
+            margin: 20px 0;
+        }
+        .welcome-message {
+            background: #d4edda;
+            border: 1px solid #c3e6cb;
+            border-radius: 5px;
+            padding: 20px;
+            margin: 20px 0;
+            color: #155724;
+        }
+        .features {
+            background: #e7f3ff;
+            border: 1px solid #b3d7ff;
+            border-radius: 5px;
+            padding: 20px;
+            margin: 20px 0;
+        }
+        .features h3 {
+            color: #0066cc;
+            margin-top: 0;
+        }
+        .features ul {
+            margin: 10px 0 0 20px;
+        }
+        .cta-button {
+            display: inline-block;
+            background: #27ae60;
+            color: white;
+            padding: 15px 30px;
+            text-decoration: none;
+            border-radius: 5px;
+            margin: 20px 0;
+            font-weight: bold;
+        }
+        .footer {
+            text-align: center;
+            margin-top: 30px;
+            font-size: 14px;
+            color: #777;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🎉 歡迎加入 WorkNow！</h1>
+        </div>
+
+        <div class="welcome-icon">👋</div>
+
+        <p>尊敬的 ${employerName} 團隊，</p>
+
+        <div class="welcome-message">
+            <strong>🎊 恭喜您成功註冊 WorkNow 打工平台！</strong><br>
+            您現在已經加入我們的打工大家庭，讓我們一起開啟成功的招聘之旅！
+        </div>
+
+        <div class="features">
+            <h3>🚀 平台特色功能</h3>
+            <ul>
+                <li>💼 快速發佈和管理工作機會</li>
+                <li>⭐ 完整的評價系統</li>
+                <li>🛡️ 安全的招聘保障</li>
+            </ul>
+        </div>
+
+        <p>現在就開始發佈您的第一個工作機會，找到優秀的打工夥伴吧！</p>
+
+        <div style="text-align: center;">
+            <a href="#" class="cta-button">立即發佈工作</a>
+        </div>
+
+        <div class="footer">
+            <p>如果您有任何問題，歡迎隨時聯繫我們的客服團隊</p>
+            <p>此郵件由系統自動發送，請勿回覆</p>
+            <p>© 2025 WorkNow 打工平台. 保留所有權利.</p>
         </div>
     </div>
 </body>

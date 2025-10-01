@@ -636,45 +636,53 @@ router.get("/:gigId", authenticated, requireEmployer, async (c) => {
       return c.text("工作不存在或無權限查看", 404);
     }
 
-    // 檢查當天是否已有打卡碼
-    const today = DateUtils.getCurrentDate();
-    const existingCode = await dbClient.query.attendanceCodes.findFirst({
-      where: and(
-        eq(attendanceCodes.gigId, gigId),
-        eq(attendanceCodes.validDate, today),
-      )
+    const gigStatus = await getGigStatus({
+      publishedAt: gig.publishedAt,
+      unlistedAt: gig.unlistedAt,
+      isActive: gig.isActive,
+      dateEnd: gig.dateEnd,
     });
 
-    let attendanceCode: string;
-    let attendanceCodeInfo: any;
+    let attendanceCodeInfo: any = undefined;
 
-    if (existingCode) {
-      // 使用現有的打卡碼
-      attendanceCode = existingCode.attendanceCode;
-      attendanceCodeInfo = {
-        attendanceCode,
-        validDate: existingCode.validDate,
-        expiresAt: existingCode.expiresAt,
-      };
-    } else {
-      // 生成新的打卡碼
-      attendanceCode = generateAttendanceCode();
-      
-      // 儲存打卡碼到資料庫
-      const [newCode] = await dbClient.insert(attendanceCodes).values({
-        gigId,
-        attendanceCode,
-        validDate: today,
-        expiresAt: sql`(CURRENT_DATE + INTERVAL '1 day' - INTERVAL '1 second')`
-      }).returning();
-      
-      attendanceCodeInfo = {
-        attendanceCode,
-        validDate: newCode.validDate,
-        expiresAt: newCode.expiresAt,
-      };
-      
-      console.log(`生成新打卡碼 - 工作ID: ${gigId}, 打卡碼: ${attendanceCode}`);
+    if (gigStatus === "已刊登") {
+      const today = DateUtils.getCurrentDate();
+      const existingCode = await dbClient.query.attendanceCodes.findFirst({
+        where: and(
+          eq(attendanceCodes.gigId, gigId),
+          eq(attendanceCodes.validDate, today),
+        )
+      });
+
+      let attendanceCode: string;
+
+      if (existingCode) {
+        // 使用現有的打卡碼
+        attendanceCode = existingCode.attendanceCode;
+        attendanceCodeInfo = {
+          attendanceCode,
+          validDate: existingCode.validDate,
+          expiresAt: existingCode.expiresAt,
+        };
+      } else {
+        // 生成新的打卡碼
+        attendanceCode = generateAttendanceCode();
+        
+        const [newCode] = await dbClient.insert(attendanceCodes).values({
+          gigId,
+          attendanceCode,
+          validDate: today,
+          expiresAt: sql`(CURRENT_DATE + INTERVAL '1 day' - INTERVAL '1 second')`
+        }).returning();
+        
+        attendanceCodeInfo = {
+          attendanceCode,
+          validDate: newCode.validDate,
+          expiresAt: newCode.expiresAt,
+        };
+        
+        console.log(`生成新打卡碼 - 工作ID: ${gigId}, 打卡碼: ${attendanceCode}`);
+      }
     }
 
     return c.json(
@@ -682,12 +690,7 @@ router.get("/:gigId", authenticated, requireEmployer, async (c) => {
         ...gig,
         environmentPhotos: await formatEnvironmentPhotos(gig.environmentPhotos),
         attendanceCodeInfo,
-        status: await getGigStatus({
-          publishedAt: gig.publishedAt,
-          unlistedAt: gig.unlistedAt,
-          isActive: gig.isActive,
-          dateEnd: gig.dateEnd,
-        }),
+        status: gigStatus,
       },
       200
     );

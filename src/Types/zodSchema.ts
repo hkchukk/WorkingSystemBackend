@@ -216,20 +216,8 @@ export const createGigSchema = z.object({
 export const updateGigSchema = z.object({
   title: z.string().min(1, "工作標題不能為空").max(256, "工作標題過長").optional(),
   description: z.string().min(1, "工作描述不能為空").max(10000, "工作描述過長").optional(),
-  dateStart: z.coerce.date().optional().refine((date) => {
-    if (!date) return true; // 可選字段，沒值就通過
-    const today = DateUtils.getCurrentDateObject();
-    return date >= today;
-  }, {
-    message: "工作開始日期不能是過去的日期"
-  }),
-  dateEnd: z.coerce.date().optional().refine((date) => {
-    if (!date) return true; // 可選字段，沒值就通過
-    const today = DateUtils.getCurrentDateObject();
-    return date >= today;
-  }, {
-    message: "工作結束日期不能是過去的日期"
-  }),
+  dateStart: z.coerce.date().optional(),
+  dateEnd: z.coerce.date().optional(),
   timeStart: z.string().transform((val) => {
     if (/^([01]?[0-9]|2[0-3]):[0-5][0-9]$/.test(val)) {
       return val;

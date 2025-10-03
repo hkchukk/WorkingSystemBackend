@@ -12,6 +12,40 @@ import { sendEmail } from "./Client/EmailClient";
 
 const app = new Hono<HonoGenericContext>();
 
+// Middleware to log all incoming requests and responses
+app.use("*", async (c, next) => {
+  const start = Date.now();
+  const timestamp = new Date().toISOString();
+  const source = c.req.header("x-forwarded-for") || "unknown";
+  const api = c.req.path;
+  console.log(`[${timestamp}] Request from: ${source}, API: ${api}`);
+
+  await next();
+
+  const duration = Date.now() - start;
+  const responseTimestamp = new Date().toISOString();
+  const response = c.res;
+  const status = response.status;
+  const logPrefix = `[${responseTimestamp}] Response for API: ${api}, Status: ${status}, Duration: ${duration}ms`;
+  const contentType = response.headers.get('Content-Type');
+
+  if (contentType && (contentType.includes('application/json') || contentType.includes('text/'))) {
+    try {
+      const body = await response.clone().json();
+      console.log(`${logPrefix}, Body:`, JSON.stringify(body));
+    } catch (e) {
+        try {
+            const body = await response.clone().text();
+            console.log(`${logPrefix}, Body:`, body);
+        } catch (e2) {
+            console.log(`${logPrefix} (Could not log body)`);
+        }
+    }
+  } else {
+    console.log(`${logPrefix} (Non-loggable content-type: ${contentType})`);
+  }
+});
+
 const store = new RedisStoreAdapter({
   prefix: "hono-session:",
   ttl: 60 * 60 * 24, // 24 小時

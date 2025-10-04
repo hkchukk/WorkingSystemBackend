@@ -328,7 +328,7 @@ export const updateGigSchema = z.object({
   });
 
 /* application route schemas */
-// 企業審核申請（只能核准或拒絕）
+// 企業審核申請
 export const reviewApplicationSchema = z.object({
   action: z.enum(["approve", "reject"], {
     message: "必須選擇核准（approve）或拒絕（reject）",

@@ -43,7 +43,7 @@ router.post(
         where: and(
           eq(gigs.gigId, gigId),
           eq(gigs.isActive, true),
-          lte(gigs.publishedAt, currentDate),
+          //lte(gigs.publishedAt, currentDate),
           gte(gigs.dateEnd, currentDate),
           sql`(${gigs.unlistedAt} IS NULL OR ${gigs.unlistedAt} >= ${currentDate})`
         )
@@ -87,7 +87,7 @@ router.post(
           conflictingGigs: conflictCheck.conflictingGigs.map(g => ({
             gigId: g.gigId,
             title: g.title,
-            workPeriod: `${g.dateStart} ~ ${g.dateEnd}`,
+            workPeriod: `${DateUtils.formatDateChinese(g.dateStart)} ~ ${DateUtils.formatDateChinese(g.dateEnd)}`,
             workTime: `${g.timeStart} ~ ${g.timeEnd}`,
           })),
         }, 409);
@@ -158,7 +158,7 @@ router.post("/cancel/:applicationId", authenticated, requireWorker, async (c) =>
     // 只有 pending_employer_review 狀態的申請可以取消
     if (application.status !== "pending_employer_review") {
       return c.json({
-        message: `無法取消申請了`,
+        message: `無法取消`,
       }, 400);
     }
 
@@ -271,7 +271,7 @@ router.get("/my-applications", authenticated, requireWorker, async (c) => {
 });
 
 /**
- * Worker 確認是否接受工作
+ * Worker 是否接受工作
  * PUT /application/:applicationId/confirm
  */
 router.put(
@@ -343,7 +343,7 @@ router.put(
             conflictingGigs: conflictCheck.conflictingGigs.map(g => ({
               gigId: g.gigId,
               title: g.title,
-              workPeriod: `${g.dateStart} ~ ${g.dateEnd}`,
+              workPeriod: `${DateUtils.formatDateChinese(g.dateStart)} ~ ${DateUtils.formatDateChinese(g.dateEnd)}`,
               workTime: `${g.timeStart} ~ ${g.timeEnd}`,
             })),
           }, 409);

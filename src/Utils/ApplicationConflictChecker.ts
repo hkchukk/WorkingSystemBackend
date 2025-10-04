@@ -1,6 +1,7 @@
 import dbClient from "../Client/DrizzleClient";
 import { gigApplications, gigs } from "../Schema/DatabaseSchema";
-import { eq, and, lte, gte, lt, gt } from "drizzle-orm";
+import { eq, and, lte, gte, lt, gt, ne } from "drizzle-orm";
+import { DateUtils } from "./DateUtils";
 
 export class ApplicationConflictChecker {
   /**
@@ -24,57 +25,51 @@ export class ApplicationConflictChecker {
     }>;
   }> {
     try {
-      const targetGig = await dbClient.query.gigs.findFirst({
-        where: eq(gigs.gigId, gigId),
-        columns: {
-          gigId: true,
-          title: true,
-          dateStart: true,
-          dateEnd: true,
-          timeStart: true,
-          timeEnd: true,
-        },
-      });
+      const targetGig = await dbClient
+        .select({
+          gigId: gigs.gigId,
+          title: gigs.title,
+          dateStart: gigs.dateStart,
+          dateEnd: gigs.dateEnd,
+          timeStart: gigs.timeStart,
+          timeEnd: gigs.timeEnd,
+        })
+        .from(gigs)
+        .where(eq(gigs.gigId, gigId))
+        .limit(1)
+        .then((rows) => rows[0]);
 
       if (!targetGig) {
         return { hasConflict: false, conflictingGigs: [] };
       }
 
-      const confirmedApplications = await dbClient.query.gigApplications.findMany({
-        where: and(
-          eq(gigApplications.workerId, workerId),
-          eq(gigApplications.status, "worker_confirmed"),
-          eq(gigs.isActive, true),
-          lte(gigs.dateStart, targetGig.dateEnd),
-          gte(gigs.dateEnd, targetGig.dateStart),
-          lt(gigs.timeStart, targetGig.timeEnd),
-          gt(gigs.timeEnd, targetGig.timeStart)
-        ),
-        with: {
-          gig: {
-            columns: {
-              gigId: true,
-              title: true,
-              dateStart: true,
-              dateEnd: true,
-              timeStart: true,
-              timeEnd: true,
-              isActive: true,
-            },
-          },
-        },
-      });
+      const targetDateStart = DateUtils.formatDate(targetGig.dateStart);
+      const targetDateEnd = DateUtils.formatDate(targetGig.dateEnd);
+      const result = await dbClient
+        .select({
+          gigId: gigs.gigId,
+          title: gigs.title,
+          dateStart: gigs.dateStart,
+          dateEnd: gigs.dateEnd,
+          timeStart: gigs.timeStart,
+          timeEnd: gigs.timeEnd,
+        })
+        .from(gigApplications)
+        .innerJoin(gigs, eq(gigApplications.gigId, gigs.gigId))
+        .where(
+          and(
+            eq(gigApplications.workerId, workerId),
+            eq(gigApplications.status, "worker_confirmed"),
+            eq(gigs.isActive, true),
+            ne(gigs.gigId, gigId),
+            lte(gigs.dateStart, targetDateEnd),
+            gte(gigs.dateEnd, targetDateStart),
+            lt(gigs.timeStart, targetGig.timeEnd),
+            gt(gigs.timeEnd, targetGig.timeStart)
+          )
+        );
 
-      const conflictingGigs = confirmedApplications
-        .filter((app) => app.gig.gigId !== gigId)
-        .map((app) => ({
-          gigId: app.gig.gigId,
-          title: app.gig.title,
-          dateStart: app.gig.dateStart,
-          dateEnd: app.gig.dateEnd,
-          timeStart: app.gig.timeStart,
-          timeEnd: app.gig.timeEnd,
-        }));
+      const conflictingGigs = result;
 
       return {
         hasConflict: conflictingGigs.length > 0,
@@ -95,45 +90,43 @@ export class ApplicationConflictChecker {
     gigId: string
   ): Promise<string[]> {
     try {
-      const targetGig = await dbClient.query.gigs.findFirst({
-        where: eq(gigs.gigId, gigId),
-        columns: {
-          dateStart: true,
-          dateEnd: true,
-          timeStart: true,
-          timeEnd: true,
-        },
-      });
+      const targetGig = await dbClient
+        .select({
+          dateStart: gigs.dateStart,
+          dateEnd: gigs.dateEnd,
+          timeStart: gigs.timeStart,
+          timeEnd: gigs.timeEnd,
+        })
+        .from(gigs)
+        .where(eq(gigs.gigId, gigId))
+        .limit(1)
+        .then((rows) => rows[0]);
 
       if (!targetGig) {
         return [];
       }
 
-      const pendingApplications = await dbClient.query.gigApplications.findMany({
-        where: and(
-          eq(gigApplications.workerId, workerId),
-          eq(gigApplications.status, "pending_worker_confirmation"),
-          lte(gigs.dateStart, targetGig.dateEnd),
-          gte(gigs.dateEnd, targetGig.dateStart),
-          lt(gigs.timeStart, targetGig.timeEnd),
-          gt(gigs.timeEnd, targetGig.timeStart)
-        ),
-        with: {
-          gig: {
-            columns: {
-              gigId: true,
-              dateStart: true,
-              dateEnd: true,
-              timeStart: true,
-              timeEnd: true,
-            },
-          },
-        },
-      });
+      const targetDateStart = DateUtils.formatDate(targetGig.dateStart);
+      const targetDateEnd = DateUtils.formatDate(targetGig.dateEnd);
+      const result = await dbClient
+        .select({
+          applicationId: gigApplications.applicationId,
+        })
+        .from(gigApplications)
+        .innerJoin(gigs, eq(gigApplications.gigId, gigs.gigId))
+        .where(
+          and(
+            eq(gigApplications.workerId, workerId),
+            eq(gigApplications.status, "pending_worker_confirmation"),
+            ne(gigs.gigId, gigId),
+            lte(gigs.dateStart, targetDateEnd),
+            gte(gigs.dateEnd, targetDateStart),
+            lt(gigs.timeStart, targetGig.timeEnd),
+            gt(gigs.timeEnd, targetGig.timeStart)
+          )
+        );
 
-      const conflictingApplicationIds = pendingApplications
-        .filter((app) => app.gig.gigId !== gigId)
-        .map((app) => app.applicationId);
+      const conflictingApplicationIds = result.map((row) => row.applicationId);
 
       return conflictingApplicationIds;
     } catch (error) {

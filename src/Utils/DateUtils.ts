@@ -100,4 +100,12 @@ export class DateUtils {
   static getCurrentDateTimeObject(): Date {
     return moment().utcOffset(DateUtils.TAIPEI_UTC_OFFSET).toDate();
   }
+
+  /**
+   * 將日期轉換為中文格式 "YYYY 年 M 月 D 日"
+   * @param date - 日期字符串、Date 對象或 moment 對象
+   */
+  static formatDateChinese(date: string | Date | moment.Moment): string {
+    return moment(date).utcOffset(DateUtils.TAIPEI_UTC_OFFSET).format("YYYY 年 M 月 D 日");
+  }
 }

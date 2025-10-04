@@ -204,10 +204,25 @@ export const gigApplications = pgTable(
       .notNull()
       .references(() => gigs.gigId, { onDelete: "cascade" }),
 
-    // 申請狀態：pending(待審核), approved(已核准), rejected(已拒絕), cancelled(已取消)
+    // 申請狀態：
+    // pending_employer_review (待企業審核)
+    // employer_rejected (企業拒絕)
+    // pending_worker_confirmation (待打工者回復)
+    // worker_confirmed (打工者確定來上班)
+    // worker_declined (打工者拒絕來上班)
+    // worker_cancelled (打工者主動取消)
+    // system_cancelled (系統取消)
     status: varchar("status", {
-      enum: ["pending", "approved", "rejected", "cancelled"],
-    }).default("pending").notNull(),
+      enum: [
+        "pending_employer_review",
+        "employer_rejected",
+        "pending_worker_confirmation",
+        "worker_confirmed",
+        "worker_declined",
+        "worker_cancelled",
+        "system_cancelled"
+      ],
+    }).default("pending_employer_review").notNull(),
 
     createdAt: timestamp("created_at").defaultNow(),
     updatedAt: timestamp("updated_at").defaultNow(),

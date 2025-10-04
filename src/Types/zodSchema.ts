@@ -328,9 +328,17 @@ export const updateGigSchema = z.object({
   });
 
 /* application route schemas */
+// 企業審核申請（只能核准或拒絕）
 export const reviewApplicationSchema = z.object({
-  status: z.enum(["approved", "rejected"], {
-    message: "必須選擇核准或拒絕",
+  action: z.enum(["approve", "reject"], {
+    message: "必須選擇核准（approve）或拒絕（reject）",
+  }),
+});
+
+// 打工者確認是否接受工作
+export const workerConfirmApplicationSchema = z.object({
+  action: z.enum(["accept", "decline"], {
+    message: "必須選擇接受（accept）或拒絕（decline）",
   }),
 });
 

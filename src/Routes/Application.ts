@@ -8,7 +8,7 @@ import {
 import type IRouter from "../Interfaces/IRouter";
 import type { HonoGenericContext } from "../Types/types";
 import dbClient from "../Client/DrizzleClient";
-import { eq, and, desc, or, lte, sql, gte } from "drizzle-orm";
+import { eq, and, desc, or, lte, sql, gte, inArray } from "drizzle-orm";
 import {
   gigs,
   gigApplications,
@@ -16,10 +16,11 @@ import {
   workers,
 } from "../Schema/DatabaseSchema";
 import { zValidator } from "@hono/zod-validator";
-import { reviewApplicationSchema } from "../Types/zodSchema";
+import { reviewApplicationSchema, workerConfirmApplicationSchema } from "../Types/zodSchema";
 import { DateUtils } from "../Utils/DateUtils";
 import NotificationHelper from "../Utils/NotificationHelper";
 import { Role } from "../Types/types";
+import { ApplicationConflictChecker } from "../Utils/ApplicationConflictChecker";
 
 const router = new Hono<HonoGenericContext>();
 
@@ -54,21 +55,42 @@ router.post(
         }, 404);
       }
 
-      // 檢查是否已經申請過這個工作（只有 pending 和 approved 狀態算作已申請）
+      // 檢查是否已經申請過這個工作
       const existingApplication = await dbClient.query.gigApplications.findFirst({
         where: and(
           eq(gigApplications.workerId, user.workerId),
           eq(gigApplications.gigId, gigId),
-          or(eq(gigApplications.status, "pending"), eq(gigApplications.status, "approved"))
+          or(
+            eq(gigApplications.status, "pending_employer_review"),
+            eq(gigApplications.status, "pending_worker_confirmation"),
+            eq(gigApplications.status, "worker_confirmed")
+          )
         ),
       });
 
       if (existingApplication) {
-        const statusText = existingApplication.status === "pending" ? "待審核" : "已核准";
         return c.json({
-          message: `您已經申請過這個工作（${statusText}）`,
+          message: `您已經申請過這個工作`,
           applicationStatus: existingApplication.status,
         }, 400);
+      }
+
+      // 檢查時間衝突（只檢查已確認的工作）
+      const conflictCheck = await ApplicationConflictChecker.checkWorkerScheduleConflict(
+        user.workerId,
+        gigId
+      );
+
+      if (conflictCheck.hasConflict) {
+        return c.json({
+          message: "此工作與您已確認的工作時間衝突",
+          conflictingGigs: conflictCheck.conflictingGigs.map(g => ({
+            gigId: g.gigId,
+            title: g.title,
+            workPeriod: `${g.dateStart} ~ ${g.dateEnd}`,
+            workTime: `${g.timeStart} ~ ${g.timeEnd}`,
+          })),
+        }, 409);
       }
 
       // 創建申請記錄
@@ -77,7 +99,7 @@ router.post(
         .values({
           workerId: user.workerId,
           gigId: gigId,
-          status: "pending",
+          status: "pending_employer_review",
         })
         .returning();
 
@@ -90,15 +112,15 @@ router.post(
         gig.gigId,
       );
 
-      return c.json({
-        message: "申請提交成功，等待商家審核",
-        data: {
-          applicationId: newApplication[0].applicationId,
-          gigTitle: gig.title,
-          status: "pending",
-          appliedAt: newApplication[0].createdAt,
-        },
-      }, 201);
+        return c.json({
+          message: "申請提交成功，等待商家審核",
+          data: {
+            applicationId: newApplication[0].applicationId,
+            gigTitle: gig.title,
+            status: "pending_employer_review",
+            appliedAt: newApplication[0].createdAt,
+          },
+        }, 201);
 
     } catch (error) {
       console.error("申請工作時發生錯誤:", error);
@@ -133,18 +155,18 @@ router.post("/cancel/:applicationId", authenticated, requireWorker, async (c) =>
       }, 404);
     }
 
-    // 只有 pending 狀態的申請可以取消
-    if (application.status !== "pending") {
+    // 只有 pending_employer_review 狀態的申請可以取消
+    if (application.status !== "pending_employer_review") {
       return c.json({
-        message: `無法取消 ${application.status === "approved" ? "已核准" : "已拒絕"} 的申請`,
+        message: `無法取消申請了`,
       }, 400);
     }
 
-    // 更新申請狀態為 cancelled
+    // 更新申請狀態為 worker_cancelled
     await dbClient
       .update(gigApplications)
       .set({
-        status: "cancelled",
+        status: "worker_cancelled",
         updatedAt: sql`now()`,
       })
       .where(eq(gigApplications.applicationId, applicationId));
@@ -153,7 +175,7 @@ router.post("/cancel/:applicationId", authenticated, requireWorker, async (c) =>
       message: "申請已成功取消",
       data: {
         applicationId: applicationId,
-        status: "cancelled",
+        status: "worker_cancelled",
       },
     }, 200);
 
@@ -180,8 +202,18 @@ router.get("/my-applications", authenticated, requireWorker, async (c) => {
     // 建立查詢條件
     const whereConditions = [eq(gigApplications.workerId, user.workerId)];
 
-    if (status && ["pending", "approved", "rejected", "cancelled"].includes(status)) {
-      whereConditions.push(eq(gigApplications.status, status as "pending" | "approved" | "rejected" | "cancelled"));
+    const validStatuses = [
+      "pending_employer_review",
+      "employer_rejected",
+      "pending_worker_confirmation",
+      "worker_confirmed",
+      "worker_declined",
+      "worker_cancelled",
+      "system_cancelled"
+    ];
+
+    if (status && validStatuses.includes(status)) {
+      whereConditions.push(eq(gigApplications.status, status as any));
     }
 
     const requestLimit = Number.parseInt(limit);
@@ -239,6 +271,187 @@ router.get("/my-applications", authenticated, requireWorker, async (c) => {
 });
 
 /**
+ * Worker 確認是否接受工作
+ * PUT /application/:applicationId/confirm
+ */
+router.put(
+  "/:applicationId/confirm",
+  authenticated,
+  requireWorker,
+  zValidator("json", workerConfirmApplicationSchema),
+  async (c) => {
+    try {
+      const user = c.get("user");
+      const applicationId = c.req.param("applicationId");
+      const { action } = c.req.valid("json");
+
+      // 查找申請記錄
+      const application = await dbClient.query.gigApplications.findFirst({
+        where: and(
+          eq(gigApplications.applicationId, applicationId),
+          eq(gigApplications.workerId, user.workerId)
+        ),
+        with: {
+          gig: {
+            with: {
+              employer: true,
+            },
+          },
+        },
+      });
+
+      if (!application) {
+        return c.json({
+          message: "申請記錄不存在",
+        }, 404);
+      }
+
+      // 只有 pending_worker_confirmation 狀態的申請可以確認
+      if (application.status !== "pending_worker_confirmation") {
+        return c.json({
+          message: "此申請不在待確認狀態",
+          currentStatus: application.status,
+        }, 400);
+      }
+
+      // 檢查工作是否仍然有效
+      if (!application.gig.isActive) {
+        return c.json({
+          message: "此工作已結束，無法確認",
+        }, 400);
+      }
+
+      // 檢查工作是否已過期
+      const currentDate = DateUtils.getCurrentDate();
+
+      if (application.gig.dateEnd && application.gig.dateEnd < currentDate) {
+        return c.json({
+          message: "此工作已過期，無法確認",
+        }, 400);
+      }
+
+      if (action === "accept") {
+        // 檢查時間衝突
+        const conflictCheck = await ApplicationConflictChecker.checkWorkerScheduleConflict(
+          user.workerId,
+          application.gig.gigId
+        );
+
+        if (conflictCheck.hasConflict) {
+          return c.json({
+            message: "此工作與您已確認的工作時間衝突",
+            conflictingGigs: conflictCheck.conflictingGigs.map(g => ({
+              gigId: g.gigId,
+              title: g.title,
+              workPeriod: `${g.dateStart} ~ ${g.dateEnd}`,
+              workTime: `${g.timeStart} ~ ${g.timeEnd}`,
+            })),
+          }, 409);
+        }
+
+        // 更新申請狀態為 worker_confirmed
+        await dbClient
+          .update(gigApplications)
+          .set({
+            status: "worker_confirmed",
+            updatedAt: sql`now()`,
+          })
+          .where(eq(gigApplications.applicationId, applicationId));
+
+        // 獲取所有與此工作時間衝突的待確認申請
+        const conflictingApplicationIds = await ApplicationConflictChecker.getConflictingPendingApplications(
+          user.workerId,
+          application.gig.gigId
+        );
+
+        // 自動取消衝突的申請
+        if (conflictingApplicationIds.length > 0) {
+          await dbClient
+            .update(gigApplications)
+            .set({
+              status: "system_cancelled",
+              updatedAt: sql`now()`,
+            })
+            .where(inArray(gigApplications.applicationId, conflictingApplicationIds));
+
+          // 查詢被取消的申請資訊，發送通知
+          const cancelledApplications = await dbClient.query.gigApplications.findMany({
+            where: inArray(gigApplications.applicationId, conflictingApplicationIds),
+            with: {
+              gig: true,
+            },
+          });
+
+          // 並行發送所有通知
+          await Promise.all(
+            cancelledApplications.map(cancelledApp =>
+              NotificationHelper.notifyWorkerSystemCancelled(
+                user.workerId,
+                Role.WORKER,
+                cancelledApp.gig.title,
+                "與已確認工作時間衝突",
+                cancelledApp.gig.gigId,
+              )
+            )
+          );
+        }
+
+        // 發送通知給企業
+        await NotificationHelper.notifyEmployerWorkerConfirmed(
+          application.gig.employerId,
+          Role.EMPLOYER,
+          `${user.firstName} ${user.lastName}`,
+          application.gig.title,
+          application.gig.gigId,
+        );
+
+        return c.json({
+          message: "已確認接受工作",
+          data: {
+            applicationId: applicationId,
+            status: "worker_confirmed",
+            cancelledConflicts: conflictingApplicationIds.length,
+          },
+        }, 200);
+      } else {
+        // 打工者拒絕工作
+        await dbClient
+          .update(gigApplications)
+          .set({
+            status: "worker_declined",
+            updatedAt: sql`now()`,
+          })
+          .where(eq(gigApplications.applicationId, applicationId));
+
+        // 發送通知給企業
+        await NotificationHelper.notifyEmployerWorkerDeclined(
+          application.gig.employerId,
+          Role.EMPLOYER,
+          `${user.firstName} ${user.lastName}`,
+          application.gig.title,
+          application.gig.gigId,
+        );
+
+        return c.json({
+          message: "已拒絕接受工作",
+          data: {
+            applicationId: applicationId,
+            status: "worker_declined",
+          },
+        }, 200);
+      }
+
+    } catch (error) {
+      console.error("確認工作時發生錯誤:", error);
+      return c.json({
+        message: "確認工作失敗",
+        error: error instanceof Error ? error.message : "未知錯誤",
+      }, 500);
+    }
+  }
+);
+
+/**
  * Worker 行事曆 - 查看已核准的工作行程
  * GET /application/worker/calendar
  */
@@ -264,10 +477,10 @@ router.get("/worker/calendar", authenticated, requireWorker, async (c) => {
       }, 400);
     }
 
-    // 建立基本查詢條件
+    // 建立基本查詢條件（只顯示已確認的工作）
     const whereConditions = [
       eq(gigApplications.workerId, user.workerId),
-      eq(gigApplications.status, "approved")
+      eq(gigApplications.status, "worker_confirmed")
     ];
 
     // 根據日期參數添加過濾條件
@@ -409,11 +622,21 @@ router.get("/gig/all", authenticated, requireEmployer, requireApprovedEmployer, 
     // 查詢所有工作的申請記錄
     let applicationWhereConditions = [];
 
-    // 單一狀態過濾：?status=pending 或不傳參數顯示全部
+    // 單一狀態過濾：?status=pending_employer_review 或不傳參數顯示全部
     let applicationStatusConditions = null;
 
-    if (status && ["pending", "approved", "rejected", "cancelled"].includes(status)) {
-      applicationStatusConditions = eq(gigApplications.status, status as "pending" | "approved" | "rejected" | "cancelled");
+    const validStatuses = [
+      "pending_employer_review",
+      "employer_rejected",
+      "pending_worker_confirmation",
+      "worker_confirmed",
+      "worker_declined",
+      "worker_cancelled",
+      "system_cancelled"
+    ];
+
+    if (status && validStatuses.includes(status)) {
+      applicationStatusConditions = eq(gigApplications.status, status as any);
     }
 
     // 建立申請查詢條件
@@ -517,9 +740,19 @@ router.get("/gig/:gigId", authenticated, requireEmployer, requireApprovedEmploye
 
     const whereConditions = [eq(gigApplications.gigId, gigId)];
 
-    // 單一狀態過濾：?status=pending 或不傳參數顯示全部
-    if (status && ["pending", "approved", "rejected", "cancelled"].includes(status)) {
-      whereConditions.push(eq(gigApplications.status, status as "pending" | "approved" | "rejected" | "cancelled"));
+    // 單一狀態過濾：?status=pending_employer_review 或不傳參數顯示全部
+    const validStatuses = [
+      "pending_employer_review",
+      "employer_rejected",
+      "pending_worker_confirmation",
+      "worker_confirmed",
+      "worker_declined",
+      "worker_cancelled",
+      "system_cancelled"
+    ];
+
+    if (status && validStatuses.includes(status)) {
+      whereConditions.push(eq(gigApplications.status, status as any));
     }
 
     const requestLimit = Number.parseInt(limit);
@@ -622,13 +855,14 @@ router.put(
     try {
       const user = c.get("user");
       const applicationId = c.req.param("applicationId");
-      const { status } = c.req.valid("json");
+      const { action } = c.req.valid("json");
 
       // 查找申請記錄
       const application = await dbClient.query.gigApplications.findFirst({
         where: eq(gigApplications.applicationId, applicationId),
         with: {
           gig: true,
+          worker: true,
         },
       });
 
@@ -660,33 +894,35 @@ router.put(
         }, 400);
       }
 
-      // 只有 pending 狀態的申請可以審核
-      if (application.status !== "pending") {
+      // 只有 pending_employer_review 狀態的申請可以審核
+      if (application.status !== "pending_employer_review") {
         return c.json({
           message: "此申請已經處理過了",
           currentStatus: application.status,
         }, 400);
       }
 
-      // 更新申請狀態
+      // 根據 action 更新申請狀態
+      const newStatus = action === "approve" ? "pending_worker_confirmation" : "employer_rejected";
+
       await dbClient
         .update(gigApplications)
         .set({
-          status: status,
+          status: newStatus,
           updatedAt: sql`now()`,
         })
         .where(eq(gigApplications.applicationId, applicationId));
 
       // 發送通知給打工者
-      if (status === "approved") {
-        await NotificationHelper.notifyApplicationApproved(
+      if (action === "approve") {
+        await NotificationHelper.notifyWorkerPendingConfirmation(
           application.workerId,
           Role.WORKER,
           application.gig.title,
           user.employerName,
           application.gig.gigId,
         );
-      } else if (status === "rejected") {
+      } else if (action === "reject") {
         await NotificationHelper.notifyApplicationRejected(
           application.workerId,
           Role.WORKER,
@@ -696,13 +932,13 @@ router.put(
         );
       }
 
-      const statusText = status === "approved" ? "核准" : "拒絕";
+      const actionText = action === "approve" ? "核准，已通知打工者確認" : "拒絕";
 
       return c.json({
-        message: `申請已${statusText}`,
+        message: `申請已${actionText}`,
         data: {
           applicationId: applicationId,
-          status: status,
+          status: newStatus,
         },
       }, 200);
 

@@ -1,0 +1,1 @@
+ALTER TABLE "gig_applications" ALTER COLUMN "status" SET DEFAULT 'pending_employer_review';

@@ -287,6 +287,86 @@ class NotificationHelper {
     }, true);
   }
 
+  /**
+   * 通知打工者：企業已接受申請，請確認是否接受工作
+   */
+  static async notifyWorkerPendingConfirmation(
+    workerId: string,
+    userRole: Role,
+    gigTitle: string,
+    employerName: string,
+    resourceId: string,
+  ) {
+    return this.create({
+      receiverId: workerId,
+      userRole,
+      title: "請確認是否接受工作",
+      message: `${employerName} 已接受您對「${gigTitle}」的申請，請確認是否接受此工作。`,
+      type: "application",
+      resourceId,
+    }, true);
+  }
+
+  /**
+   * 通知企業：打工者已確認接受工作
+   */
+  static async notifyEmployerWorkerConfirmed(
+    employerId: string,
+    userRole: Role,
+    workerName: string,
+    gigTitle: string,
+    resourceId: string,
+  ) {
+    return this.create({
+      receiverId: employerId,
+      userRole,
+      title: "打工者已確認接受",
+      message: `${workerName} 已確認接受工作「${gigTitle}」。`,
+      type: "application",
+      resourceId,
+    }, true);
+  }
+
+  /**
+   * 通知企業：打工者拒絕接受工作
+   */
+  static async notifyEmployerWorkerDeclined(
+    employerId: string,
+    userRole: Role,
+    workerName: string,
+    gigTitle: string,
+    resourceId: string,
+  ) {
+    return this.create({
+      receiverId: employerId,
+      userRole,
+      title: "打工者拒絕接受",
+      message: `${workerName} 拒絕接受工作「${gigTitle}」。`,
+      type: "application",
+      resourceId,
+    }, true);
+  }
+
+  /**
+   * 通知打工者：申請因時間衝突被系統自動取消
+   */
+  static async notifyWorkerSystemCancelled(
+    workerId: string,
+    userRole: Role,
+    gigTitle: string,
+    reason: string,
+    resourceId: string,
+  ) {
+    return this.create({
+      receiverId: workerId,
+      userRole,
+      title: "申請已被系統取消",
+      message: `您對工作「${gigTitle}」的申請已被系統取消。原因：${reason}`,
+      type: "system",
+      resourceId,
+    }, true);
+  }
+
   static async notifyRatingReceived(
     receiverId: string,
     userRole: Role,

@@ -416,8 +416,8 @@ class NotificationHelper {
     }, true);
   }
 
-  static async notifyAccountRejected(userId: string, userRole: Role, accountName: string) {
-    const message = `很抱歉，您的帳戶「${accountName}」審核未通過，請聯繫客服了解詳情。`;
+  static async notifyAccountRejected(userId: string, userRole: Role, accountName: string, reason: string) {
+    const message = `很抱歉，您的帳戶「${accountName}」審核未通過，原因：${reason}。`;
 
     return this.create({
       receiverId: userId,

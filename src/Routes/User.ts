@@ -342,14 +342,14 @@ router.get("/profile", authenticated, async (c) => {
 
           if (presignedUrl) {
             return { ...doc, presignedUrl };
-          } 
+          } else {
             console.warn(`❌ 驗證文件 URL 生成失敗: ${doc.r2Name}`);
             return {
               ...doc,
               presignedUrl: null,
               error: "URL 生成失敗"
             };
-          
+          }
         })
       );
     } else {
@@ -381,6 +381,11 @@ router.get("/profile", authenticated, async (c) => {
       verificationDocuments: documentsWithUrls,
       ratingStats,
     });
+  }
+
+  if (user.role === Role.ADMIN) {
+    const { password, ...adminData } = user;
+    return c.json(adminData);
   }
 
   return c.text("Invalid role", 400);
@@ -540,6 +545,10 @@ router.put("/update/identification", authenticated, requireEmployer, uploadDocum
   const files = uploadedFilesObj[(body.identificationType === "businessNo") ? "verificationDocuments" : "identificationDocuments"] || [];
 
   try {
+    if (user.approvalStatus === "approved") {
+      return c.text("Approved employers cannot update identification documents", 400);
+    }
+
     if (files.length === 0) {
       return c.text("No files uploaded for verification", 400);
     }
@@ -579,6 +588,7 @@ router.put("/update/identification", authenticated, requireEmployer, uploadDocum
         identificationType: body.identificationType,
         identificationNumber: body.identificationNumber,
         verificationDocuments: uploadDBFiles,
+        approvalStatus: "pending",
         updatedAt: sql`now()`,
       })
       .where(eq(employers.employerId, user.employerId));

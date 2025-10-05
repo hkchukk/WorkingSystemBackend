@@ -14,6 +14,7 @@ import NotificationHelper from "../Utils/NotificationHelper";
 import { UserCache } from "../Client/Cache/Index";
 import { Role } from "../Types/types";
 import SessionManager from "../Utils/SessionManager";
+import {FileManager} from "../Client/Cache/Index";
 
 const router = new Hono<HonoGenericContext>();
 
@@ -28,9 +29,68 @@ router.post("/register", zValidator("json", adminRegisterSchema), async (c) => {
 });
 
 router.get("/pendingEmployer", authenticated, requireAdmin, async (c) => {
-	const pendingEmployers = await dbClient.query.employers.findMany({
+	let pendingEmployers = await dbClient.query.employers.findMany({
 		where: eq(employers.approvalStatus, "pending"),
+		columns: {
+			password: false,
+			fcmTokens: false,
+		},
 	});
+
+  //
+  pendingEmployers = await Promise.all(
+    pendingEmployers.map(async (employer,index)=> {
+      const employerPhoto = employer.employerPhoto as {
+        originalName: string;
+        r2Name: string;
+        type: string;
+      };
+      let photoUrlData = null;
+      console.log(employerPhoto);
+      if (employerPhoto && employerPhoto.r2Name) {
+        const url = await FileManager.getPresignedUrl(`profile-photos/employers/${employerPhoto.r2Name}`);
+        if (url) {
+          photoUrlData = {
+          url: url,
+          originalName: employerPhoto.originalName,
+          type: employerPhoto.type,
+          };
+        }
+        employer.employerPhoto = photoUrlData;	
+      } else {
+        console.log("No employer photo found for employer:", employer.employerId);
+        employer.employerPhoto = null;
+      }
+
+      let documentsWithUrls = [];
+
+      if (employer.verificationDocuments && Array.isArray(employer.verificationDocuments)) {
+        documentsWithUrls = await Promise.all(
+          employer.verificationDocuments.map(async (doc) => {
+            if (!doc || !doc.r2Name) {
+              return null;
+            }
+
+            const presignedUrl = await FileManager.getPresignedUrl(`identification/${employer.employerId}/${doc.r2Name}`);
+
+            if (presignedUrl) {
+              return {
+                url: presignedUrl,
+                originalName: doc.originalName,
+                type: doc.type,
+              };
+            } else {
+              return null;
+            }
+          }
+        ));
+      }
+      employer.verificationDocuments = documentsWithUrls.filter(doc => doc !== null);
+      return employer;
+
+    }
+  ));
+
 	return c.json(pendingEmployers);
 });
 
@@ -67,6 +127,40 @@ router.patch(
 	},
 );
 
+router.patch("/rejectEmployer/:id", authenticated, requireAdmin, async (c) => {
+  const id = c.req.param("id");
+  const body = await c.req.json();
+  const reason = body.reason || "請聯繫客服了解詳情";
+  const employerFound = await dbClient.query.employers.findFirst({
+    where: eq(employers.employerId, id),
+  });
+
+  if (!employerFound) {
+    return c.text("Employer not found", 404);
+  }
+
+  if (employerFound.approvalStatus !== "pending") {
+    return c.text("Employer is not in pending status", 400);
+  }
+
+  const updatedEmployer = await dbClient
+    .update(employers)
+    .set({ approvalStatus: "rejected" })
+    .where(eq(employers.employerId, id))
+    .returning();
+  
+  // 發送審核拒絕通知
+  await NotificationHelper.notifyAccountRejected(
+    employerFound.employerId,
+    Role.EMPLOYER,
+    employerFound.employerName,
+    reason
+  );
+
+  await UserCache.clearUserProfile(employerFound.employerId, Role.EMPLOYER);
+  return c.json(updatedEmployer[0]);
+});
+  
 // 踢用戶下線
 router.post("/kick-user/:userId", authenticated, async (c) => {
 	const userId = c.req.param("userId");

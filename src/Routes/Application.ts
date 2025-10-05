@@ -83,7 +83,7 @@ router.post(
 
       if (conflictCheck.hasConflict) {
         return c.json({
-          message: "此工作與您已確認的工作時間衝突",
+          message: "此工作與您其他工作時間衝突",
           conflictingGigs: conflictCheck.conflictingGigs.map(g => ({
             gigId: g.gigId,
             title: g.title,
@@ -155,14 +155,12 @@ router.post("/cancel/:applicationId", authenticated, requireWorker, async (c) =>
       }, 404);
     }
 
-    // 只有 pending_employer_review 狀態的申請可以取消
     if (application.status !== "pending_employer_review") {
       return c.json({
         message: `無法取消`,
       }, 400);
     }
 
-    // 更新申請狀態為 worker_cancelled
     await dbClient
       .update(gigApplications)
       .set({
@@ -201,7 +199,6 @@ router.get("/my-applications", authenticated, requireWorker, async (c) => {
 
     // 建立查詢條件
     const whereConditions = [eq(gigApplications.workerId, user.workerId)];
-
     const validStatuses = [
       "pending_employer_review",
       "employer_rejected",
@@ -219,7 +216,7 @@ router.get("/my-applications", authenticated, requireWorker, async (c) => {
     const requestLimit = Number.parseInt(limit);
     const requestOffset = Number.parseInt(offset);
 
-    // 查詢申請記錄（多查一筆來判斷是否還有更多數據）
+    // 查詢申請記錄
     const applications = await dbClient.query.gigApplications.findMany({
       where: and(...whereConditions),
       with: {
@@ -285,7 +282,6 @@ router.put(
       const applicationId = c.req.param("applicationId");
       const { action } = c.req.valid("json");
 
-      // 查找申請記錄
       const application = await dbClient.query.gigApplications.findFirst({
         where: and(
           eq(gigApplications.applicationId, applicationId),
@@ -306,7 +302,6 @@ router.put(
         }, 404);
       }
 
-      // 只有 pending_worker_confirmation 狀態的申請可以確認
       if (application.status !== "pending_worker_confirmation") {
         return c.json({
           message: "此申請不在待確認狀態",
@@ -314,14 +309,12 @@ router.put(
         }, 400);
       }
 
-      // 檢查工作是否仍然有效
       if (!application.gig.isActive) {
         return c.json({
           message: "此工作已結束，無法確認",
         }, 400);
       }
 
-      // 檢查工作是否已過期
       const currentDate = DateUtils.getCurrentDate();
 
       if (application.gig.dateEnd && application.gig.dateEnd < currentDate) {
@@ -331,7 +324,7 @@ router.put(
       }
 
       if (action === "accept") {
-        // 檢查時間衝突
+        // 檢查已確認工作的時間衝突
         const conflictCheck = await ApplicationConflictChecker.checkWorkerScheduleConflict(
           user.workerId,
           application.gig.gigId
@@ -351,7 +344,7 @@ router.put(
             user.workerId,
             Role.WORKER,
             application.gig.title,
-            "此工作與您已確認的工作時間衝突",
+            "此工作與您其他工作時間衝突",
             application.gig.gigId,
           );
 
@@ -361,12 +354,12 @@ router.put(
             Role.EMPLOYER,
             `${user.firstName} ${user.lastName}`,
             application.gig.title,
-            "打工者已確認的工作時間衝突",
+            "打工者其他工作時間衝突",
             application.gig.gigId,
           );
 
           return c.json({
-            message: "此工作與您已確認的工作時間衝突，申請已被系統自動取消",
+            message: "此工作與您其他工作時間衝突，申請已被系統自動取消",
             conflictingGigs: conflictCheck.conflictingGigs.map(g => ({
               gigId: g.gigId,
               title: g.title,
@@ -400,7 +393,7 @@ router.put(
             })
             .where(inArray(gigApplications.applicationId, conflictingApplicationIds));
 
-          // 查詢被取消的申請資訊，發送通知
+          // 查詢被取消的申請資訊
           const cancelledApplications = await dbClient.query.gigApplications.findMany({
             where: inArray(gigApplications.applicationId, conflictingApplicationIds),
             with: {
@@ -419,7 +412,7 @@ router.put(
                 user.workerId,
                 Role.WORKER,
                 cancelledApp.gig.title,
-                "與申請中的工作時間衝突",
+                "其他工作時間衝突",
                 cancelledApp.gig.gigId,
               ),
               // 通知企業
@@ -428,7 +421,7 @@ router.put(
                 Role.EMPLOYER,
                 `${user.firstName} ${user.lastName}`,
                 cancelledApp.gig.title,
-                "打工者申請中的工作時間衝突",
+                "打工者其他工作時間衝突",
                 cancelledApp.gig.gigId,
               ),
             ])

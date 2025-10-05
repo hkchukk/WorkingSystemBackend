@@ -6,9 +6,6 @@ import { DateUtils } from "./DateUtils";
 export class ApplicationConflictChecker {
   /**
    * 檢查打工者在指定時間是否有已確認的工作（衝突檢查）
-   * @param workerId 打工者 ID
-   * @param gigId 要檢查的工作 ID
-   * @returns 如果有衝突返回衝突的工作列表，否則返回空陣列
    */
   static async checkWorkerScheduleConflict(
     workerId: string,

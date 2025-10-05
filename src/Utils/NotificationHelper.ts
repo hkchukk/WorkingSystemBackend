@@ -361,7 +361,7 @@ class NotificationHelper {
       receiverId: workerId,
       userRole,
       title: "申請已被系統取消",
-      message: `您對工作「${gigTitle}」的申請已被系統取消。原因：${reason}`,
+      message: `您的工作「${gigTitle}」申請已被系統取消。原因：${reason}`,
       type: "system",
       resourceId,
     }, true);
@@ -382,7 +382,7 @@ class NotificationHelper {
       receiverId: employerId,
       userRole,
       title: "申請已被系統取消",
-      message: `${workerName} 對工作「${gigTitle}」的申請已被系統取消。原因：${reason}`,
+      message: `${workerName} 的工作「${gigTitle}」申請已被系統取消。原因：${reason}`,
       type: "system",
       resourceId,
     }, true);

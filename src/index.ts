@@ -8,7 +8,6 @@ import { hash } from "@node-rs/argon2";
 import { Glob } from "bun";
 import type IRouter from "./Interfaces/IRouter";
 import redisClient from "./Client/RedisClient";
-import { sendEmail } from "./Client/EmailClient";
 
 const app = new Hono<HonoGenericContext>();
 
@@ -69,20 +68,6 @@ app.get("/", (c) => {
 app.get("/hashing/:password", async (c) => {
   const password = c.req.param("password");
   return c.text(await hash(password, argon2Config));
-});
-
-app.post("/send-test-email", async (c) => {
-  try {
-    const to = ""; // 換成您想測試的收件人地址
-    const subject = "Hello from Nodemailer!";
-    const html = "<h1>Welcome</h1><p>This is a test email sent using Nodemailer and Google OAuth2.</p>";
-
-    await sendEmail(to, subject, html);
-    return c.json({ success: true, message: "Email sent successfully!" });
-  } catch (error) {
-    console.error(error);
-    return c.json({ success: false, message: "Failed to send email." }, 500);
-  }
 });
 
 // 載入路由

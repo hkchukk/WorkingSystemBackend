@@ -59,7 +59,7 @@ router.post(
         where: and(
           eq(gigApplications.workerId, user.workerId),
           eq(gigApplications.gigId, gigId),
-          eq(gigApplications.status, "approved")
+          eq(gigApplications.status, "worker_confirmed")
         )
       });
 
@@ -211,7 +211,7 @@ router.get(
         .innerJoin(employers, eq(gigs.employerId, employers.employerId))
         .where(and(
           eq(gigApplications.workerId, user.workerId),
-          eq(gigApplications.status, "approved"),
+          eq(gigApplications.status, "worker_confirmed"),
           lte(gigs.dateStart, today),
           gte(gigs.dateEnd, today)
         ));

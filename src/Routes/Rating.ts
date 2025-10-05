@@ -65,7 +65,7 @@ router.post(
           gigApplications: {
             where: and(
               eq(gigApplications.workerId, workerId),
-              eq(gigApplications.status, "approved")
+              eq(gigApplications.status, "worker_confirmed")
             ),
             limit: 1,
             columns: {
@@ -161,7 +161,7 @@ router.post(
           gigApplications: {
             where: and(
               eq(gigApplications.workerId, workerId),
-              eq(gigApplications.status, "approved")
+              eq(gigApplications.status, "worker_confirmed")
             ),
             limit: 1,
             columns: {
@@ -693,7 +693,7 @@ router.get("/list/employer/gig/:gigId", authenticated, requireEmployer, requireA
     // 建立查詢條件
     const whereConditions = [
       eq(gigApplications.gigId, gigId),
-      eq(gigApplications.status, "approved"), // 必須是已批准的申請
+      eq(gigApplications.status, "worker_confirmed"), // 必須是已批准的申請
     ];
 
     // 根據篩選條件添加評分狀態篩選
@@ -795,7 +795,7 @@ router.get("/list/worker", authenticated, requireWorker, async (c) => {
       ))
       .where(and(
         eq(gigApplications.workerId, workerId),
-        eq(gigApplications.status, "approved"),
+        eq(gigApplications.status, "worker_confirmed"),
         lt(gigs.dateEnd, currentDate), // 工作必須已結束
         sql`${employerRatings.ratingId} IS NULL` // 該打工者未評分
       ))

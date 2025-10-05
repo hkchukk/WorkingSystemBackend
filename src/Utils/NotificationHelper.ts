@@ -367,6 +367,27 @@ class NotificationHelper {
     }, true);
   }
 
+  /**
+   * 通知企業：打工者的申請因時間衝突被系統自動取消
+   */
+  static async notifyEmployerApplicationSystemCancelled(
+    employerId: string,
+    userRole: Role,
+    workerName: string,
+    gigTitle: string,
+    reason: string,
+    resourceId: string,
+  ) {
+    return this.create({
+      receiverId: employerId,
+      userRole,
+      title: "申請已被系統取消",
+      message: `${workerName} 對工作「${gigTitle}」的申請已被系統取消。原因：${reason}`,
+      type: "system",
+      resourceId,
+    }, true);
+  }
+
   static async notifyRatingReceived(
     receiverId: string,
     userRole: Role,

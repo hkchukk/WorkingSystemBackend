@@ -338,8 +338,35 @@ router.put(
         );
 
         if (conflictCheck.hasConflict) {
+          await dbClient
+            .update(gigApplications)
+            .set({
+              status: "system_cancelled",
+              updatedAt: sql`now()`,
+            })
+            .where(eq(gigApplications.applicationId, applicationId));
+
+          // 發送通知給 Worker
+          await NotificationHelper.notifyWorkerSystemCancelled(
+            user.workerId,
+            Role.WORKER,
+            application.gig.title,
+            "此工作與您已確認的工作時間衝突",
+            application.gig.gigId,
+          );
+
+          // 發送通知給企業
+          await NotificationHelper.notifyEmployerApplicationSystemCancelled(
+            application.gig.employerId,
+            Role.EMPLOYER,
+            `${user.firstName} ${user.lastName}`,
+            application.gig.title,
+            "打工者已確認的工作時間衝突",
+            application.gig.gigId,
+          );
+
           return c.json({
-            message: "此工作與您已確認的工作時間衝突",
+            message: "此工作與您已確認的工作時間衝突，申請已被系統自動取消",
             conflictingGigs: conflictCheck.conflictingGigs.map(g => ({
               gigId: g.gigId,
               title: g.title,
@@ -349,7 +376,6 @@ router.put(
           }, 409);
         }
 
-        // 更新申請狀態為 worker_confirmed
         await dbClient
           .update(gigApplications)
           .set({
@@ -378,21 +404,34 @@ router.put(
           const cancelledApplications = await dbClient.query.gigApplications.findMany({
             where: inArray(gigApplications.applicationId, conflictingApplicationIds),
             with: {
-              gig: true,
+              gig: {
+                with: {
+                  employer: true,
+                },
+              },
             },
           });
 
-          // 並行發送所有通知
           await Promise.all(
-            cancelledApplications.map(cancelledApp =>
+            cancelledApplications.flatMap(cancelledApp => [
+              // 通知 Worker
               NotificationHelper.notifyWorkerSystemCancelled(
                 user.workerId,
                 Role.WORKER,
                 cancelledApp.gig.title,
-                "與已確認工作時間衝突",
+                "與申請中的工作時間衝突",
                 cancelledApp.gig.gigId,
-              )
-            )
+              ),
+              // 通知企業
+              NotificationHelper.notifyEmployerApplicationSystemCancelled(
+                cancelledApp.gig.employerId,
+                Role.EMPLOYER,
+                `${user.firstName} ${user.lastName}`,
+                cancelledApp.gig.title,
+                "打工者申請中的工作時間衝突",
+                cancelledApp.gig.gigId,
+              ),
+            ])
           );
         }
 

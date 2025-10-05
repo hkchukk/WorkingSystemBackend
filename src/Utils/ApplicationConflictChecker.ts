@@ -1,6 +1,6 @@
 import dbClient from "../Client/DrizzleClient";
 import { gigApplications, gigs } from "../Schema/DatabaseSchema";
-import { eq, and, lte, gte, lt, gt, ne } from "drizzle-orm";
+import { eq, and, lte, gte, lt, gt, ne, inArray } from "drizzle-orm";
 import { DateUtils } from "./DateUtils";
 
 export class ApplicationConflictChecker {
@@ -117,7 +117,7 @@ export class ApplicationConflictChecker {
         .where(
           and(
             eq(gigApplications.workerId, workerId),
-            eq(gigApplications.status, "pending_worker_confirmation"),
+            inArray(gigApplications.status, ["pending_worker_confirmation", "pending_employer_review"]),
             ne(gigs.gigId, gigId),
             lte(gigs.dateStart, targetDateEnd),
             gte(gigs.dateEnd, targetDateStart),

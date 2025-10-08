@@ -236,25 +236,22 @@ router.get("/my-applications", authenticated, requireWorker, async (c) => {
     const actualApplications = hasMore ? applications.slice(0, requestLimit) : applications;
 
     return c.json({
-      message: "獲取申請記錄成功",
-      data: {
-        applications: actualApplications.map(app => ({
-          applicationId: app.applicationId,
-          gigId: app.gigId,
-          gigTitle: app.gig.title,
-          employerName: app.gig.employer.employerName,
-          hourlyRate: app.gig.hourlyRate,
-          workDate: `${app.gig.dateStart} ~ ${app.gig.dateEnd}`,
-          workTime: `${app.gig.timeStart} ~ ${app.gig.timeEnd}`,
-          status: app.status,
-          appliedAt: app.createdAt,
-        })),
-        pagination: {
-          limit: requestLimit,
-          offset: requestOffset,
-          hasMore: hasMore,
-          returned: actualApplications.length,
-        },
+      applications: actualApplications.map(app => ({
+        applicationId: app.applicationId,
+        gigId: app.gigId,
+        gigTitle: app.gig.title,
+        employerName: app.gig.employer.employerName,
+        hourlyRate: app.gig.hourlyRate,
+        workDate: `${app.gig.dateStart} ~ ${app.gig.dateEnd}`,
+        workTime: `${app.gig.timeStart} ~ ${app.gig.timeEnd}`,
+        status: app.status,
+        appliedAt: app.createdAt,
+      })),
+      pagination: {
+        limit: requestLimit,
+        offset: requestOffset,
+        hasMore: hasMore,
+        returned: actualApplications.length,
       },
     }, 200);
 

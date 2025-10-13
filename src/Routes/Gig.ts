@@ -43,7 +43,7 @@ async function getGigStatus(gig: {
     return "已刊登";
   }
   
-  return "待刊登";
+  return "未開始";
 }
 
 // 統一的照片上傳處理函數
@@ -147,10 +147,7 @@ async function formatEnvironmentPhotos(environmentPhotos: any, limit?: number) {
         if (!photo || !photo.filename) {
           console.warn('照片物件缺少 filename:', photo);
           return {
-            url: null,
             error: "照片資料不完整",
-            originalName: "********",
-            type: photo?.type || 'unknown'
           };
         }
 
@@ -159,18 +156,14 @@ async function formatEnvironmentPhotos(environmentPhotos: any, limit?: number) {
         if (!presignedUrl) {
           console.warn(`環境照片 URL 生成失敗: ${photo.filename}`);
           return {
-            url: null,
             error: "圖片連結生成失敗",
-            originalName: "********",
-            type: photo.type,
-            filename: "********"
           };
         } else {
           return {
             url: presignedUrl,
             originalName: "********",
             type: photo.type,
-            filename: "********"
+            filename: photo.filename
           };
         }
       })
@@ -197,94 +190,6 @@ function buildGigData(body: any, user: any, environmentPhotosInfo: any) {
     environmentPhotos: environmentPhotosInfo ? environmentPhotosInfo : null,
   };
 }
-
-// 刪除 S3 文件
-router.delete("/deleteFile/:filename", authenticated, requireEmployer, requireApprovedEmployer, async (c) => {
-  const user = c.get("user");
-  const filename = c.req.param("filename");
-
-  if (!filename) {
-    return c.text("Filename is required", 400);
-  }
-
-  try {
-    // 查找包含該文件的工作
-    const targetGig = await dbClient.query.gigs.findFirst({
-      where: and(eq(gigs.employerId, user.employerId), sql`environment_photos::text LIKE ${`%${filename}%`}`),
-      columns: {
-        gigId: true,
-        environmentPhotos: true,
-        dateEnd: true,
-        isActive: true,
-      },
-    });
-
-    const hasExactMatch =
-      targetGig && Array.isArray(targetGig.environmentPhotos) && targetGig.environmentPhotos.some((photo: any) => photo.filename === filename);
-
-    // 如果找不到包含該文件的工作，返回錯誤
-    if (!targetGig || !hasExactMatch) {
-      return c.json(
-        {
-          message: `沒有找到文件 ${filename}`,
-        },
-        404
-      );
-    }
-
-    const today = DateUtils.getCurrentDate();
-
-    // 檢查工作是否已過期
-    if (DateUtils.formatDate(targetGig.dateEnd) < today) {
-      return c.json(
-        {
-          message: "工作已過期，無法刪除照片",
-        },
-        400
-      );
-    }
-
-    // 檢查工作是否已關閉
-    if (!targetGig.isActive) {
-      return c.json(
-        {
-          message: "工作已關閉，無法刪除照片",
-        },
-        400
-      );
-    }
-
-    // 更新照片陣列
-    const updatedPhotos = Array.isArray(targetGig.environmentPhotos)
-      ? targetGig.environmentPhotos.filter((photo: any) => photo.filename !== filename)
-      : [];
-
-    // 更新資料庫
-    await dbClient
-      .update(gigs)
-      .set({
-        environmentPhotos: updatedPhotos.length > 0 ? updatedPhotos : [],
-        updatedAt: sql`now()`,
-      })
-      .where(eq(gigs.gigId, targetGig.gigId));
-
-    // 刪除 S3 文件
-    await s3Client.delete(`environment-photos/${filename}`);
-
-    // 清除 Redis 快取
-    await FileManager.deleteCache(filename);
-
-    return c.json(
-      {
-        message: `文件 ${filename} 刪除成功`,
-      },
-      200
-    );
-  } catch (error) {
-    console.error(`刪除文件 ${filename} 時出錯:`, error);
-    return c.text("刪除文件失敗", 500);
-  }
-});
 
 // 獲取所有可用工作
 router.get("/public", async (c) => {
@@ -332,7 +237,6 @@ router.get("/public", async (c) => {
     // 建立查詢條件
     const whereConditions = [
       eq(gigs.isActive, true),
-      lte(gigs.publishedAt, today),
       sql`(${gigs.unlistedAt} IS NULL OR ${gigs.unlistedAt} >= ${today})`,
       gte(gigs.dateEnd, searchDateStart),
     ];
@@ -406,7 +310,6 @@ router.get("/public/:gigId", async (c) => {
     const whereConditions = [
       eq(gigs.gigId, gigId),
       eq(gigs.isActive, true),
-      lte(gigs.publishedAt, today),
       sql`(${gigs.unlistedAt} IS NULL OR ${gigs.unlistedAt} >= ${today})`,
     ];
 
@@ -519,6 +422,7 @@ router.get("/my-gigs", authenticated, requireEmployer, async (c) => {
     const limit = c.req.query("limit") || "10";
     const offset = c.req.query("offset") || "0";
     const status = c.req.query("status") || "ongoing";
+    const search = c.req.query("search");
     const requestLimit = Number.parseInt(limit);
     const requestOffset = Number.parseInt(offset);
     const currentDate = DateUtils.getCurrentDate();
@@ -548,6 +452,11 @@ router.get("/my-gigs", authenticated, requireEmployer, async (c) => {
           sql`${gigs.unlistedAt} IS NOT NULL`
         );
       }
+    }
+
+    // PGroonga 關鍵字搜尋（title / description 任一符合）
+    if (search) {
+      whereConditions.push(sql`(${gigs.title} &@~ ${search} OR ${gigs.description} &@~ ${search})`);
     }
 
     const myGigs = await dbClient.query.gigs.findMany({
@@ -591,14 +500,23 @@ router.get("/my-gigs", authenticated, requireEmployer, async (c) => {
       }))
     );
 
-    let totalCountValue = await GigCache.getMyGigsCount(user.employerId, status);
-    if (totalCountValue == null) {
+    let totalCountValue: number;
+    if (search) {
       const [row] = await dbClient
         .select({ total: count() })
         .from(gigs)
         .where(and(...whereConditions));
       totalCountValue = Number(row?.total ?? 0);
-      await GigCache.setMyGigsCount(user.employerId, status, totalCountValue);
+    } else {
+      totalCountValue = await GigCache.getMyGigsCount(user.employerId, status);
+      if (totalCountValue == null) {
+        const [row] = await dbClient
+          .select({ total: count() })
+          .from(gigs)
+          .where(and(...whereConditions));
+        totalCountValue = Number(row?.total ?? 0);
+        await GigCache.setMyGigsCount(user.employerId, status, totalCountValue);
+      }
     }
 
     const totalPage = Math.max(1, Math.ceil(totalCountValue / requestLimit));
@@ -614,6 +532,7 @@ router.get("/my-gigs", authenticated, requireEmployer, async (c) => {
           totalCount: totalCountValue,
           totalPage,
         },
+        search: search || null,
       },
       200
     );
@@ -677,8 +596,8 @@ router.get("/:gigId", authenticated, requireEmployer, async (c) => {
         
         attendanceCodeInfo = {
           attendanceCode,
-          validDate: newCode.validDate,
-          expiresAt: newCode.expiresAt,
+          //validDate: newCode.validDate,
+          //expiresAt: newCode.expiresAt,
         };
         
         console.log(`生成新打卡碼 - 工作ID: ${gigId}, 打卡碼: ${attendanceCode}`);
@@ -738,41 +657,101 @@ router.put(
         return c.text("工作已關閉，無法更新", 400);
       }
 
-      // 處理照片上傳
-      const existingPhotos = Array.isArray(existingGig.environmentPhotos) ? existingGig.environmentPhotos : [];
-      const { environmentPhotosInfo, uploadedFiles: filesList, addedCount, totalCount, message } = await handlePhotoUpload(reqFile, existingPhotos);
+      // 獲取現有照片
+      let currentPhotos = Array.isArray(existingGig.environmentPhotos) ? existingGig.environmentPhotos : [];
+      let deletedCount = 0;
+
+      // 處理照片刪除
+      const deletedPhotoIdsStr = body.deletedPhotoFiles;
+
+      if (deletedPhotoIdsStr) {
+        const deletedPhotoIds = JSON.parse(deletedPhotoIdsStr);
+
+        if (Array.isArray(deletedPhotoIds) && deletedPhotoIds.length > 0) {
+          console.log(`準備刪除 ${deletedPhotoIds.length} 張照片`);
+
+          // 找出要刪除的照片
+          const photosToDelete = currentPhotos.filter((photo: any) => 
+            deletedPhotoIds.includes(photo.filename) || 
+            deletedPhotoIds.some((id: string) => 
+              photo.filename?.includes(id)
+            )
+          );
+
+          // 從 S3 刪除照片
+          if (photosToDelete.length > 0) {
+            await Promise.all(
+              photosToDelete.map(async (photo: any) => {
+                const key = `environment-photos/${photo.filename}`;
+                await s3Client.delete(key);
+                await FileManager.deleteCache(photo.filename);
+                console.log(`已刪除照片: ${photo.filename}`);
+              })
+            );
+            
+            deletedCount = photosToDelete.length;
+          }
+
+          // 更新照片列表
+          currentPhotos = currentPhotos.filter((photo: any) => 
+            !deletedPhotoIds.includes(photo.filename) && 
+            !deletedPhotoIds.some((id: string) => 
+              photo.filename?.includes(id)
+            )
+          );
+
+          console.log(`照片刪除完成，剩餘 ${currentPhotos.length} 張照片`);
+        }
+      }
+
+      // 處理新照片上傳
+      const { environmentPhotosInfo, uploadedFiles: filesList, addedCount, totalCount, message } = await handlePhotoUpload(reqFile, currentPhotos);
       uploadedFiles = filesList;
+
+      const updateData: any = {
+        ...body,
+        updatedAt: sql`now()`,
+        dateStart: body.dateStart ? DateUtils.formatDate(body.dateStart) : undefined,
+        dateEnd: body.dateEnd ? DateUtils.formatDate(body.dateEnd) : undefined,
+        publishedAt: body.dateStart ? DateUtils.formatDate(body.dateStart) : undefined,
+      };
+
+      if (addedCount > 0 || deletedCount > 0) {
+        updateData.environmentPhotos = environmentPhotosInfo;
+      }
+
+      // 移除 deletedPhotoIds 欄位
+      delete updateData.deletedPhotoFiles;
 
       await dbClient
         .update(gigs)
-        .set({
-          ...body,
-          updatedAt: sql`now()`,
-          dateStart: body.dateStart ? DateUtils.formatDate(body.dateStart) : undefined,
-          dateEnd: body.dateEnd ? DateUtils.formatDate(body.dateEnd) : undefined,
-          publishedAt: body.dateStart ? DateUtils.formatDate(body.dateStart) : undefined,
-          environmentPhotos: addedCount > 0 ? environmentPhotosInfo : undefined,
-        })
+        .set(updateData)
         .where(eq(gigs.gigId, gigId));
 
-      // 檢查是否有照片相關操作
-      const hasPhotoOperation = reqFile?.environmentPhotos || addedCount > 0;
-      const responseMessage =
-        hasPhotoOperation && addedCount > 0
-          ? `工作更新成功，${message}`
-          : hasPhotoOperation && addedCount === 0
-            ? `工作更新成功，${message}`
-            : "工作更新成功";
+      let responseMessage = "工作更新成功";
+      const photoOperations: string[] = [];
+
+      if (deletedCount > 0) {
+        photoOperations.push(`刪除了 ${deletedCount} 張照片`);
+      }
+      if (addedCount > 0) {
+        photoOperations.push(message);
+      }
+
+      if (photoOperations.length > 0) {
+        responseMessage += `，${photoOperations.join("，")}`;
+      }
 
       await GigCache.clearMyGigsCount(user.employerId);
 
       return c.json(
         {
           message: responseMessage,
-          photoInfo: hasPhotoOperation
+          photoInfo: (addedCount > 0 || deletedCount > 0)
             ? {
               totalPhotos: totalCount,
               addedPhotos: addedCount,
+              deletedPhotos: deletedCount,
             }
             : undefined,
         },

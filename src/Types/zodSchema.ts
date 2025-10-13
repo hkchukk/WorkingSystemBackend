@@ -259,6 +259,7 @@ export const updateGigSchema = z.object({
   contactPerson: z.string().min(1, "聯絡人不能為空").max(32, "聯絡人姓名過長").optional(),
   contactPhone: z.string().regex(/^(09\d{8}|\+8869\d{8}|0\d{1,2}-?\d{6,8})$/, "聯絡電話格式不正確").optional(),
   contactEmail: z.email("聯絡人 Email 格式不正確").max(128, "Email 過長").optional(),
+  deletedPhotoFiles: z.string().optional(),
 })
   // 1. 成對驗證
   .refine((data) => {

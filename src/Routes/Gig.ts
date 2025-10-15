@@ -4,14 +4,16 @@ import { requireEmployer, requireApprovedEmployer } from "../Middleware/guards";
 import type IRouter from "../Interfaces/IRouter";
 import type { HonoGenericContext } from "../Types/types";
 import dbClient from "../Client/DrizzleClient";
-import { eq, and, desc, sql, gte, lte, lt, gt, count } from "drizzle-orm";
-import { gigs, attendanceCodes } from "../Schema/DatabaseSchema";
+import { eq, and, desc, sql, gte, lte, lt, gt, count, inArray } from "drizzle-orm";
+import { gigs, attendanceCodes, gigApplications } from "../Schema/DatabaseSchema";
 import { zValidator } from "@hono/zod-validator";
 import { createGigSchema, updateGigSchema } from "../Types/zodSchema";
 import { uploadEnvironmentPhotos } from "../Middleware/fileUpload";
 import { FileManager, s3Client, GigCache } from "../Client/Cache/Index";
 import { DateUtils } from "../Utils/DateUtils";
 import { generateAttendanceCode } from "../Utils/AttendanceUtils";
+import { ApplicationConflictChecker } from "../Utils/ApplicationConflictChecker";
+import { Role } from "../Types/types";
 
 const router = new Hono<HonoGenericContext>();
 
@@ -342,15 +344,98 @@ router.get("/public/:gigId", async (c) => {
       if (url) {
         gig.employer.employerPhoto = {
           url: url,
-          originalName: photo.originalName,
+          originalName: "********",
           type: photo.type,
         };
+      }
+    }
+
+    // 檢查用戶是否已登入
+    const session = c.get("session");
+    const userId = session.get("id");
+    const role = session.get("role");
+    let applicationStatus: string | null;
+    let conflictingGigs: any[] = [];
+    let conflictingPendingApplications: any[] = [];
+
+    if (userId && role === Role.WORKER) {
+      // 查找該打工者對此工作的申請狀態
+      const application = await dbClient.query.gigApplications.findFirst({
+        where: and(
+          eq(gigApplications.workerId, userId),
+          eq(gigApplications.gigId, gigId)
+        ),
+        columns: {
+          status: true,
+        },
+      });
+
+      if (application) {
+        applicationStatus = application.status;
+
+        // 檢查衝突的已確認工作
+        const conflictCheck = await ApplicationConflictChecker.checkWorkerScheduleConflict(
+          userId,
+          gigId
+        );
+
+        if (conflictCheck.hasConflict) {
+          conflictingGigs = conflictCheck.conflictingGigs.map(conflict => ({
+            gigId: conflict.gigId,
+            title: conflict.title,
+            dateStart: DateUtils.formatDate(conflict.dateStart),
+            dateEnd: DateUtils.formatDate(conflict.dateEnd),
+            timeStart: conflict.timeStart,
+            timeEnd: conflict.timeEnd,
+          }));
+        }
+
+        if (applicationStatus === "pending_worker_confirmation") {
+          // 獲取衝突的待確認申請
+          const conflictingApplicationIds = await ApplicationConflictChecker.getConflictingPendingApplications(
+            userId,
+            gigId
+          );
+
+          if (conflictingApplicationIds.length > 0) {
+            // 查詢衝突的申請詳細資訊
+            const conflictingApps = await dbClient.query.gigApplications.findMany({
+              where: inArray(gigApplications.applicationId, conflictingApplicationIds),
+              with: {
+                gig: {
+                  columns: {
+                    gigId: true,
+                    title: true,
+                    dateStart: true,
+                    dateEnd: true,
+                    timeStart: true,
+                    timeEnd: true,
+                  },
+                },
+              },
+            });
+
+            conflictingPendingApplications = conflictingApps.map(app => ({
+              applicationId: app.applicationId,
+              gigId: app.gig.gigId,
+              title: app.gig.title,
+              dateStart: DateUtils.formatDate(app.gig.dateStart),
+              dateEnd: DateUtils.formatDate(app.gig.dateEnd),
+              timeStart: app.gig.timeStart,
+              timeEnd: app.gig.timeEnd,
+              status: app.status,
+            }));
+          }
+        }
       }
     }
 
     const formattedGig = {
       ...gig,
       environmentPhotos: await formatEnvironmentPhotos(gig.environmentPhotos),
+      applicationStatus,
+      conflictingGigs: conflictingGigs.length > 0 ? conflictingGigs : undefined,
+      conflictingPendingApplications: conflictingPendingApplications.length > 0 ? conflictingPendingApplications : undefined,
     };
 
     return c.json(formattedGig, 200);

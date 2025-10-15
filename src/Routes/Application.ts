@@ -8,7 +8,7 @@ import {
 import type IRouter from "../Interfaces/IRouter";
 import type { HonoGenericContext } from "../Types/types";
 import dbClient from "../Client/DrizzleClient";
-import { eq, and, desc, or, lte, sql, gte, inArray } from "drizzle-orm";
+import { eq, and, desc, or, lte, sql, gte } from "drizzle-orm";
 import {
   gigs,
   gigApplications,
@@ -20,7 +20,6 @@ import { reviewApplicationSchema, workerConfirmApplicationSchema } from "../Type
 import { DateUtils } from "../Utils/DateUtils";
 import NotificationHelper from "../Utils/NotificationHelper";
 import { Role } from "../Types/types";
-import { ApplicationConflictChecker } from "../Utils/ApplicationConflictChecker";
 
 const router = new Hono<HonoGenericContext>();
 
@@ -73,24 +72,6 @@ router.post(
           message: `您已經申請過這個工作`,
           applicationStatus: existingApplication.status,
         }, 400);
-      }
-
-      // 檢查時間衝突（只檢查已確認的工作）
-      const conflictCheck = await ApplicationConflictChecker.checkWorkerScheduleConflict(
-        user.workerId,
-        gigId
-      );
-
-      if (conflictCheck.hasConflict) {
-        return c.json({
-          message: "此工作與您其他工作時間衝突",
-          conflictingGigs: conflictCheck.conflictingGigs.map(g => ({
-            gigId: g.gigId,
-            title: g.title,
-            workPeriod: `${DateUtils.formatDateChinese(g.dateStart)} ~ ${DateUtils.formatDateChinese(g.dateEnd)}`,
-            workTime: `${g.timeStart} ~ ${g.timeEnd}`,
-          })),
-        }, 409);
       }
 
       // 創建申請記錄
@@ -321,51 +302,6 @@ router.put(
       }
 
       if (action === "accept") {
-        // 檢查已確認工作的時間衝突
-        const conflictCheck = await ApplicationConflictChecker.checkWorkerScheduleConflict(
-          user.workerId,
-          application.gig.gigId
-        );
-
-        if (conflictCheck.hasConflict) {
-          await dbClient
-            .update(gigApplications)
-            .set({
-              status: "system_cancelled",
-              updatedAt: sql`now()`,
-            })
-            .where(eq(gigApplications.applicationId, applicationId));
-
-          // 發送通知給 Worker
-          await NotificationHelper.notifyWorkerSystemCancelled(
-            user.workerId,
-            Role.WORKER,
-            application.gig.title,
-            "此工作與您其他工作時間衝突",
-            application.gig.gigId,
-          );
-
-          // 發送通知給企業
-          await NotificationHelper.notifyEmployerApplicationSystemCancelled(
-            application.gig.employerId,
-            Role.EMPLOYER,
-            `${user.firstName} ${user.lastName}`,
-            application.gig.title,
-            "打工者其他工作時間衝突",
-            application.gig.gigId,
-          );
-
-          return c.json({
-            message: "此工作與您其他工作時間衝突，申請已被系統自動取消",
-            conflictingGigs: conflictCheck.conflictingGigs.map(g => ({
-              gigId: g.gigId,
-              title: g.title,
-              workPeriod: `${DateUtils.formatDateChinese(g.dateStart)} ~ ${DateUtils.formatDateChinese(g.dateEnd)}`,
-              workTime: `${g.timeStart} ~ ${g.timeEnd}`,
-            })),
-          }, 409);
-        }
-
         await dbClient
           .update(gigApplications)
           .set({
@@ -373,57 +309,6 @@ router.put(
             updatedAt: sql`now()`,
           })
           .where(eq(gigApplications.applicationId, applicationId));
-
-        // 獲取所有與此工作時間衝突的待確認申請
-        const conflictingApplicationIds = await ApplicationConflictChecker.getConflictingPendingApplications(
-          user.workerId,
-          application.gig.gigId
-        );
-
-        // 自動取消衝突的申請
-        if (conflictingApplicationIds.length > 0) {
-          await dbClient
-            .update(gigApplications)
-            .set({
-              status: "system_cancelled",
-              updatedAt: sql`now()`,
-            })
-            .where(inArray(gigApplications.applicationId, conflictingApplicationIds));
-
-          // 查詢被取消的申請資訊
-          const cancelledApplications = await dbClient.query.gigApplications.findMany({
-            where: inArray(gigApplications.applicationId, conflictingApplicationIds),
-            with: {
-              gig: {
-                with: {
-                  employer: true,
-                },
-              },
-            },
-          });
-
-          await Promise.all(
-            cancelledApplications.flatMap(cancelledApp => [
-              // 通知 Worker
-              NotificationHelper.notifyWorkerSystemCancelled(
-                user.workerId,
-                Role.WORKER,
-                cancelledApp.gig.title,
-                "其他工作時間衝突",
-                cancelledApp.gig.gigId,
-              ),
-              // 通知企業
-              NotificationHelper.notifyEmployerApplicationSystemCancelled(
-                cancelledApp.gig.employerId,
-                Role.EMPLOYER,
-                `${user.firstName} ${user.lastName}`,
-                cancelledApp.gig.title,
-                "打工者其他工作時間衝突",
-                cancelledApp.gig.gigId,
-              ),
-            ])
-          );
-        }
 
         // 發送通知給企業
         await NotificationHelper.notifyEmployerWorkerConfirmed(
@@ -439,7 +324,6 @@ router.put(
           data: {
             applicationId: applicationId,
             status: "worker_confirmed",
-            cancelledConflicts: conflictingApplicationIds.length,
           },
         }, 200);
       } else {

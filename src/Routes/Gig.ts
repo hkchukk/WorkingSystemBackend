@@ -370,25 +370,25 @@ router.get("/public/:gigId", async (c) => {
         },
       });
 
+      // 檢查衝突的已確認工作
+      const conflictCheck = await ApplicationConflictChecker.checkWorkerScheduleConflict(
+        userId,
+        gigId
+      );
+
+      if (conflictCheck.hasConflict) {
+        conflictingGigs = conflictCheck.conflictingGigs.map(conflict => ({
+          gigId: conflict.gigId,
+          title: conflict.title,
+          dateStart: DateUtils.formatDate(conflict.dateStart),
+          dateEnd: DateUtils.formatDate(conflict.dateEnd),
+          timeStart: conflict.timeStart,
+          timeEnd: conflict.timeEnd,
+        }));
+      }
+
       if (application) {
         applicationStatus = application.status;
-
-        // 檢查衝突的已確認工作
-        const conflictCheck = await ApplicationConflictChecker.checkWorkerScheduleConflict(
-          userId,
-          gigId
-        );
-
-        if (conflictCheck.hasConflict) {
-          conflictingGigs = conflictCheck.conflictingGigs.map(conflict => ({
-            gigId: conflict.gigId,
-            title: conflict.title,
-            dateStart: DateUtils.formatDate(conflict.dateStart),
-            dateEnd: DateUtils.formatDate(conflict.dateEnd),
-            timeStart: conflict.timeStart,
-            timeEnd: conflict.timeEnd,
-          }));
-        }
 
         if (applicationStatus === "pending_worker_confirmation") {
           // 獲取衝突的待確認申請
